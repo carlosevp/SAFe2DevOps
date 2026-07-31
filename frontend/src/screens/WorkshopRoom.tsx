@@ -4,6 +4,7 @@ import {
   Mic, Pause, RotateCcw, Square, Clock, Link2, Copy, Ban, Paperclip, X,
 } from 'lucide-react'
 import {
+  ApiError,
   getInterview,
   resumeInterview,
   saveInterview,
@@ -23,6 +24,7 @@ import {
   type RemoteContribution,
   type RemoteInvite,
 } from '../lib/api'
+import { formatAssessmentNotFound } from '../lib/assessmentSession'
 import MicrophoneTest from '../components/MicrophoneTest'
 import { RealtimeTranscriptionController, type SessionDiagnostics } from '../lib/realtimeTranscription'
 import {
@@ -36,6 +38,7 @@ interface Props {
   dark: boolean
   onNavigate: (s: Screen) => void
   assessmentId?: string | null
+  onAssessmentBound?: (id: string, name: string) => void
 }
 
 type UiOutcome = 'none' | 'clarify' | 'sufficient' | 'processing'
@@ -64,8 +67,9 @@ function newIdempotencyKey() {
   return `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) {
+export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessmentBound }: Props) {
   const [session, setSession] = useState<InterviewSession | null>(null)
+  const effectiveAssessmentId = assessmentId || session?.assessment_id || null
   const [answerText, setAnswerText] = useState('')
   const [clarificationText, setClarificationText] = useState('')
   const [outcome, setOutcome] = useState<UiOutcome>('none')
@@ -97,21 +101,27 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   const voiceRef = useRef<RealtimeTranscriptionController | null>(null)
   const hostEditingLive = useRef(false)
 
+  const remotePollDead = useRef(false)
+
   const refreshRemote = useCallback(async () => {
-    if (!assessmentId) return
+    if (!effectiveAssessmentId || remotePollDead.current) return
     try {
       const [settings, inbox] = await Promise.all([
-        getRemoteSettings(assessmentId),
-        listRemoteContributions(assessmentId),
+        getRemoteSettings(effectiveAssessmentId),
+        listRemoteContributions(effectiveAssessmentId),
       ])
       setRemoteEnabled(settings.remote_participation_enabled)
       setActiveInvite(settings.active_invite)
       setPendingCount(settings.pending_count || inbox.pending_count)
       setInboxItems(inbox.items)
-    } catch {
-      // Non-fatal for workshop load.
+    } catch (err) {
+      // Stop hammering a missing assessment (avoids console 404 spam).
+      if (err instanceof ApiError && err.code === 'assessment_not_found') {
+        remotePollDead.current = true
+        setError(formatAssessmentNotFound(effectiveAssessmentId))
+      }
     }
-  }, [assessmentId])
+  }, [effectiveAssessmentId])
 
   useEffect(() => {
     getAiSettings()
@@ -125,13 +135,14 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }, [])
 
   useEffect(() => {
-    if (!assessmentId) return
+    remotePollDead.current = false
+    if (!effectiveAssessmentId) return
     void refreshRemote()
     const timer = setInterval(() => {
       void refreshRemote()
     }, 8000)
     return () => clearInterval(timer)
-  }, [assessmentId, refreshRemote])
+  }, [effectiveAssessmentId, refreshRemote])
 
   useEffect(() => {
     const controller = new RealtimeTranscriptionController({
@@ -172,13 +183,13 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }, [])
 
   useEffect(() => {
-    voiceRef.current?.setAssessmentContext(assessmentId || null, session?.topic_label || null)
-  }, [assessmentId, session?.topic_label])
+    voiceRef.current?.setAssessmentContext(effectiveAssessmentId, session?.topic_label || null)
+  }, [effectiveAssessmentId, session?.topic_label])
 
   const loadSession = useCallback(async () => {
     if (!assessmentId) {
       setLoading(false)
-      setError('No assessment selected. Complete setup and evidence confirmation first.')
+      setError('No assessment selected. Use Resume on the welcome screen, or complete setup first.')
       return
     }
     setLoading(true)
@@ -187,7 +198,10 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
       let data: InterviewSession
       try {
         data = await getInterview(assessmentId)
-      } catch {
+      } catch (err) {
+        if (err instanceof ApiError && err.code === 'assessment_not_found') {
+          throw err
+        }
         const started = await startInterview(assessmentId)
         data = started.session
       }
@@ -195,29 +209,38 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
         data = await resumeInterview(assessmentId)
       }
       setSession(data)
+      onAssessmentBound?.(data.assessment_id, data.team_name)
       setAnswerText(data.draft_answer_text || '')
       setOutcome(data.last_outcome === 'clarify' ? 'clarify' : data.last_outcome === 'sufficient' ? 'sufficient' : 'none')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load interview')
+      if (err instanceof ApiError && err.code === 'assessment_not_found') {
+        setError(formatAssessmentNotFound(assessmentId))
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load interview')
+      }
     } finally {
       setLoading(false)
     }
-  }, [assessmentId])
+  }, [assessmentId, onAssessmentBound])
 
   useEffect(() => {
     void loadSession()
   }, [loadSession])
 
   useEffect(() => {
-    if (!assessmentId || !session) return
+    if (!effectiveAssessmentId || !session) return
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current)
     autosaveTimer.current = setTimeout(() => {
-      void saveInterviewDraft(assessmentId, answerText).catch(() => undefined)
+      void saveInterviewDraft(effectiveAssessmentId, answerText).catch((err: unknown) => {
+        if (err instanceof ApiError && err.code === 'assessment_not_found') {
+          setError(formatAssessmentNotFound(effectiveAssessmentId))
+        }
+      })
     }, 900)
     return () => {
       if (autosaveTimer.current) clearTimeout(autosaveTimer.current)
     }
-  }, [answerText, assessmentId, session])
+  }, [answerText, effectiveAssessmentId, session])
 
   const practices = session?.practices || []
   const suffCount = practices.filter(p => p.coverage_state === 'sufficient').length
@@ -235,7 +258,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }, [practices])
 
   async function handleSubmitAnswer() {
-    if (!assessmentId || !answerText.trim()) return
+    if (!effectiveAssessmentId || !answerText.trim()) return
     setOutcome('processing')
     setError(null)
     const key = lastIdempotency.current && outcome === 'processing'
@@ -243,40 +266,50 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
       : newIdempotencyKey()
     lastIdempotency.current = key
     try {
-      const result = await submitInterviewTurn(assessmentId, {
+      const result = await submitInterviewTurn(effectiveAssessmentId, {
         answer_text: answerText.trim(),
         idempotency_key: key,
         is_clarification: false,
       })
       setLastResult(result)
       setSession(result.session)
+      onAssessmentBound?.(result.session.assessment_id, result.session.team_name)
       setAnswerText('')
       setOutcome(result.session.last_outcome === 'clarify' ? 'clarify' : 'sufficient')
       lastIdempotency.current = null
     } catch (err) {
       setOutcome('none')
-      setError(err instanceof Error ? err.message : 'Failed to submit answer')
+      if (err instanceof ApiError && err.code === 'assessment_not_found') {
+        setError(formatAssessmentNotFound(effectiveAssessmentId))
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to submit answer')
+      }
     }
   }
 
   async function handleSubmitClarification() {
-    if (!assessmentId || !clarificationText.trim()) return
+    if (!effectiveAssessmentId || !clarificationText.trim()) return
     setOutcome('processing')
     setError(null)
     const key = newIdempotencyKey()
     try {
-      const result = await submitInterviewTurn(assessmentId, {
+      const result = await submitInterviewTurn(effectiveAssessmentId, {
         answer_text: clarificationText.trim(),
         idempotency_key: key,
         is_clarification: true,
       })
       setLastResult(result)
       setSession(result.session)
+      onAssessmentBound?.(result.session.assessment_id, result.session.team_name)
       setClarificationText('')
       setOutcome(result.session.last_outcome === 'clarify' ? 'clarify' : 'sufficient')
     } catch (err) {
       setOutcome('clarify')
-      setError(err instanceof Error ? err.message : 'Failed to submit clarification')
+      if (err instanceof ApiError && err.code === 'assessment_not_found') {
+        setError(formatAssessmentNotFound(effectiveAssessmentId))
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to submit clarification')
+      }
     }
   }
 
@@ -286,12 +319,12 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }
 
   async function handleSaveExit() {
-    if (!assessmentId) {
+    if (!effectiveAssessmentId) {
       onNavigate('welcome')
       return
     }
     try {
-      await saveInterview(assessmentId, answerText)
+      await saveInterview(effectiveAssessmentId, answerText)
     } catch {
       // still exit
     }
@@ -299,9 +332,9 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }
 
   async function handleFinish() {
-    if (!assessmentId || !session?.completion_eligible) return
+    if (!effectiveAssessmentId || !session?.completion_eligible) return
     try {
-      const data = await completeInterview(assessmentId)
+      const data = await completeInterview(effectiveAssessmentId)
       setSession(data)
       onNavigate('admin-review')
     } catch (err) {
@@ -310,10 +343,10 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }
 
   async function handleToggleRemote(enabled: boolean) {
-    if (!assessmentId) return
+    if (!effectiveAssessmentId) return
     setInviteBusy(true)
     try {
-      const settings = await updateRemoteSettings(assessmentId, enabled)
+      const settings = await updateRemoteSettings(effectiveAssessmentId, enabled)
       setRemoteEnabled(settings.remote_participation_enabled)
       setActiveInvite(settings.active_invite)
       if (!enabled) setActiveInvite(null)
@@ -325,14 +358,14 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }
 
   async function handleCreateInvite() {
-    if (!assessmentId) return
+    if (!effectiveAssessmentId) return
     setInviteBusy(true)
     try {
       if (!remoteEnabled) {
-        await updateRemoteSettings(assessmentId, true)
+        await updateRemoteSettings(effectiveAssessmentId, true)
         setRemoteEnabled(true)
       }
-      const invite = await createRemoteInvite(assessmentId)
+      const invite = await createRemoteInvite(effectiveAssessmentId)
       setActiveInvite(invite)
       setRemoteNotice('Invite link created. Copy and share it with remote contributors.')
     } catch (err) {
@@ -354,10 +387,10 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }
 
   async function handleRevokeInvite() {
-    if (!assessmentId || !activeInvite) return
+    if (!effectiveAssessmentId || !activeInvite) return
     setInviteBusy(true)
     try {
-      await revokeRemoteInvite(assessmentId, activeInvite.jti)
+      await revokeRemoteInvite(effectiveAssessmentId, activeInvite.jti)
       setActiveInvite(null)
       setRemoteNotice('Invite link revoked.')
     } catch (err) {
@@ -368,13 +401,13 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   }
 
   async function handleDisposition(id: string, action: 'include' | 'defer' | 'dismiss') {
-    if (!assessmentId) return
+    if (!effectiveAssessmentId) return
     try {
-      const result = await disposeRemoteContribution(assessmentId, id, action)
+      const result = await disposeRemoteContribution(effectiveAssessmentId, id, action)
       setRemoteNotice(result.notification || `Contribution ${action}d.`)
       if (action === 'include') {
         // Refresh coverage without advancing the host question.
-        const data = await getInterview(assessmentId)
+        const data = await getInterview(effectiveAssessmentId)
         const previousQuestion = session?.current_question
         setSession(data)
         if (previousQuestion && data.current_question !== previousQuestion) {

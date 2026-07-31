@@ -1,15 +1,47 @@
-import { ArrowRight, Play, Link2, Search, CheckCircle2, Shield, ChevronRight } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowRight, Play, Link2, Search, CheckCircle2, Shield, ChevronRight, X } from 'lucide-react'
+import { listAssessments, type AssessmentSummary } from '../lib/api'
 import type { Screen } from '../types'
 
 interface WelcomeProps {
   dark: boolean
   onNavigate: (s: Screen) => void
+  onResumeAssessment?: (id: string, name: string, next: Screen) => void
 }
 
-export default function Welcome({ dark, onNavigate }: WelcomeProps) {
+function resumeScreenForStatus(status: string): Screen {
+  if (status === 'published' || status === 'archived') return 'results'
+  if (status === 'admin_review' || status === 'interview_complete') return 'admin-review'
+  if (status === 'evidence_ready' || status === 'collecting_evidence') return 'evidence'
+  if (status === 'setup') return 'setup'
+  return 'workshop'
+}
+
+export default function Welcome({ dark, onNavigate, onResumeAssessment }: WelcomeProps) {
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
   const cardBg = dark ? 'var(--card)' : '#fff'
   const mutedBg = dark ? '#141f35' : '#f8fafc'
+  const [resumeOpen, setResumeOpen] = useState(false)
+  const [resumeLoading, setResumeLoading] = useState(false)
+  const [resumeError, setResumeError] = useState<string | null>(null)
+  const [assessments, setAssessments] = useState<AssessmentSummary[]>([])
+
+  async function openResume() {
+    setResumeOpen(true)
+    setResumeLoading(true)
+    setResumeError(null)
+    try {
+      const items = await listAssessments()
+      setAssessments(items)
+      if (!items.length) {
+        setResumeError('No assessments found yet. Start a new assessment first.')
+      }
+    } catch (err) {
+      setResumeError(err instanceof Error ? err.message : 'Could not load assessments')
+    } finally {
+      setResumeLoading(false)
+    }
+  }
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--background)' }}>
@@ -79,7 +111,7 @@ export default function Welcome({ dark, onNavigate }: WelcomeProps) {
               Start new assessment
             </button>
             <button
-              onClick={() => onNavigate('workshop')}
+              onClick={() => void openResume()}
               className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium text-sm transition-base"
               style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.18)')}
@@ -172,6 +204,73 @@ export default function Welcome({ dark, onNavigate }: WelcomeProps) {
             Tool credentials remain server-side and are never exposed to assessment participants. Audio is discarded after transcription by default. Only corrected transcripts are retained.
           </p>
         </div>
+
+        {resumeOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(15, 23, 42, 0.55)' }}
+            onClick={() => setResumeOpen(false)}
+          >
+            <div
+              className="w-full max-w-lg rounded-xl p-5 shadow-xl"
+              style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>
+                  Resume an assessment
+                </h3>
+                <button type="button" onClick={() => setResumeOpen(false)} className="p-1 rounded" style={{ color: 'var(--muted-foreground)' }}>
+                  <X size={16} />
+                </button>
+              </div>
+              <p className="text-xs mb-4" style={{ color: 'var(--muted-foreground)', lineHeight: 1.5 }}>
+                Choose a saved assessment. Requests use <code>/api/assessments/…</code> with that id.
+              </p>
+              {resumeLoading && (
+                <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Loading assessments…</p>
+              )}
+              {resumeError && (
+                <p className="text-sm mb-3" style={{ color: '#d97706' }}>{resumeError}</p>
+              )}
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {assessments.map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      const next = resumeScreenForStatus(item.status)
+                      onResumeAssessment?.(item.id, item.team_name, next)
+                      setResumeOpen(false)
+                    }}
+                    className="w-full text-left rounded-lg px-3 py-2.5 transition-base"
+                    style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}
+                  >
+                    <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                      {item.team_name}
+                    </div>
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                      {item.product_service_name} · {item.status.replaceAll('_', ' ')}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {!resumeLoading && !assessments.length && !resumeError && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResumeOpen(false)
+                    onNavigate('setup')
+                  }}
+                  className="mt-3 text-sm font-medium"
+                  style={{ color: 'var(--primary)' }}
+                >
+                  Start a new assessment
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Admin links */}
         <div className="mt-10 pt-8" style={{ borderTop: `1px solid ${cardBorder}` }}>

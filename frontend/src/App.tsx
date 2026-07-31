@@ -13,6 +13,7 @@ import AISettings from './screens/AISettings'
 import EnterpriseStandards from './screens/EnterpriseStandards'
 import AdminLogin from './screens/AdminLogin'
 import { adminLogout, getAdminMe } from './lib/api'
+import { readStoredAssessment, writeStoredAssessment } from './lib/assessmentSession'
 import type { Screen } from './types'
 
 const ASSESSMENT_SCREENS: Screen[] = ['setup', 'evidence', 'workshop', 'checkpoint', 'admin-review', 'results']
@@ -40,11 +41,18 @@ export default function App() {
   const [inviteToken] = useState<string | null>(() => readInviteToken())
   const [screen, setScreen] = useState<Screen>(() => (readInviteToken() ? 'remote-contributor' : 'welcome'))
   const [dark, setDark] = useState(false)
-  const [assessmentId, setAssessmentId] = useState<string | null>(null)
-  const [assessmentName, setAssessmentName] = useState('Claims Integration')
+  const stored = readStoredAssessment()
+  const [assessmentId, setAssessmentId] = useState<string | null>(() => stored?.id ?? null)
+  const [assessmentName, setAssessmentName] = useState(() => stored?.name ?? 'Assessment')
   const [authChecked, setAuthChecked] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
   const [pendingScreen, setPendingScreen] = useState<Screen | null>(null)
+
+  const bindAssessment = useCallback((id: string, name: string) => {
+    setAssessmentId(id)
+    setAssessmentName(name || 'Assessment')
+    writeStoredAssessment(id, name || 'Assessment')
+  }, [])
 
   useEffect(() => {
     if (dark) {
@@ -133,7 +141,14 @@ export default function App() {
       />
 
       {screen === 'welcome' && (
-        <Welcome dark={dark} onNavigate={navigateProtected} />
+        <Welcome
+          dark={dark}
+          onNavigate={navigateProtected}
+          onResumeAssessment={(id, name, next) => {
+            bindAssessment(id, name)
+            navigateProtected(next)
+          }}
+        />
       )}
       {screen === 'integrations' && (
         <Integrations dark={dark} onNavigate={navigateProtected} />
@@ -143,8 +158,7 @@ export default function App() {
           dark={dark}
           onNavigate={navigateProtected}
           onAssessmentReady={(id, name) => {
-            setAssessmentId(id)
-            setAssessmentName(name)
+            bindAssessment(id, name)
           }}
         />
       )}
@@ -158,7 +172,12 @@ export default function App() {
       )}
       {(screen === 'workshop' || screen === 'checkpoint') && (
         <div style={{ position: 'relative' }}>
-          <WorkshopRoom dark={dark} onNavigate={navigateProtected} assessmentId={assessmentId} />
+          <WorkshopRoom
+            dark={dark}
+            onNavigate={navigateProtected}
+            assessmentId={assessmentId}
+            onAssessmentBound={(id, name) => bindAssessment(id, name)}
+          />
           {showCheckpoint && (
             <Checkpoint dark={dark} onNavigate={navigateProtected} assessmentId={assessmentId} />
           )}

@@ -62,12 +62,14 @@ APP_SECRET_KEY=<long random secret you will type at login>
 DATA_ENCRYPTION_KEY=<different long random secret>
 OPENAI_API_KEY=<your key>
 INTERVIEW_PROVIDER=live
-OPENAI_TRANSCRIPTION_MODEL=gpt-4o-transcribe
+OPENAI_TRANSCRIPTION_MODEL=gpt-live-transcribe
 PUBLIC_BASE_URL=https://<your-service>.up.railway.app
 ALLOW_MOCK_HOST_AUTH=false
 ```
 
 Do not set `VITE_API_BASE_URL` for the Railway image; the SPA calls `/api` on the same origin.
+
+If the workshop shows **Assessment not found** after a redeploy, the SQLite file was almost certainly not on a persistent volume (or `DATA_DIR` is wrong). Confirm the volume mount is `/data` and `DATA_DIR=/data`, then use **Resume an assessment** on the welcome screen (or start a new assessment). API paths are always `/api/assessments/{id}/…` (plural).
 
 Voice transcription mints an ephemeral OpenAI Realtime key server-side (`POST /v1/realtime/client_secrets`); the browser then POSTs SDP directly to OpenAI. Look for `realtime client_secrets failed …` or `voice client event …` in Railway logs. In **AI & Voice settings**, set the transcription model to `gpt-4o-transcribe` if an older value is still stored.
 

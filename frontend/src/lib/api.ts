@@ -176,6 +176,14 @@ export function createAssessment(body: {
   return apiFetch<AssessmentSummary>('/api/assessments', { method: 'POST', body: JSON.stringify(body) })
 }
 
+export function listAssessments() {
+  return apiFetch<AssessmentSummary[]>('/api/assessments')
+}
+
+export function getAssessment(assessmentId: string) {
+  return apiFetch<AssessmentSummary>(`/api/assessments/${assessmentId}`)
+}
+
 export function setSourceSelection(assessmentId: string, body: Record<string, unknown>) {
   return apiFetch<AssessmentSummary>(`/api/assessments/${assessmentId}/source-selection`, {
     method: 'POST',
