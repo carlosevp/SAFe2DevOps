@@ -90,6 +90,24 @@ function recorderFilename(mimeType: string): string {
   return 'capture.webm'
 }
 
+/** How long to keep the Realtime channel open after commit so delayed transcripts can arrive. */
+export function postCommitWaitMs(liveDelay: string | undefined | null): number {
+  switch ((liveDelay || 'medium').toLowerCase()) {
+    case 'minimal':
+      return 1500
+    case 'low':
+      return 2500
+    case 'medium':
+      return 4500
+    case 'high':
+      return 8000
+    case 'xhigh':
+      return 12000
+    default:
+      return 4500
+  }
+}
+
 function mediaErrorMessage(err: unknown): string {
   if (typeof window !== 'undefined' && !window.isSecureContext) {
     return 'Microphone requires HTTPS. Open the Railway URL directly in a browser tab.'
@@ -394,25 +412,20 @@ export class RealtimeTranscriptionController {
     if (this.ctx.state !== 'listening' && this.ctx.state !== 'paused' && this.ctx.state !== 'live_draft') {
       return
     }
-    const frozen = displayAnswerText(this.store)
+    const frozenBeforeCommit = displayAnswerText(this.store)
     this.dispatch({ type: 'FINISH' })
-    // Ensure frozen draft is set even if state machine merge was empty.
-    if (frozen && !this.ctx.liveDraftFrozen) {
-      this.ctx = { ...this.ctx, liveDraftFrozen: frozen, finalTranscript: frozen }
+    if (frozenBeforeCommit && !this.ctx.liveDraftFrozen) {
+      this.ctx = {
+        ...this.ctx,
+        liveDraftFrozen: frozenBeforeCommit,
+        finalTranscript: frozenBeforeCommit,
+      }
       this.callbacks.onContext(this.ctx)
     }
 
-    try {
-      if (this.session.dc && this.session.dc.readyState === 'open') {
-        this.session.dc.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
-      }
-    } catch {
-      // ignore
-    }
-
-    // Brief wait for late completed events before tearing down the data channel.
-    await new Promise(r => setTimeout(r, 600))
-    const liveDraft = displayAnswerText(this.store) || frozen
+    // Keep the peer up after commit — with higher live_delay, deltas often arrive
+    // only after input_audio_buffer.commit, well after 600ms.
+    const liveDraft = await this.commitAndCollectLiveDraft(frozenBeforeCommit)
     this.ctx = {
       ...this.ctx,
       liveDraftFrozen: liveDraft,
@@ -436,8 +449,17 @@ export class RealtimeTranscriptionController {
 
     const refineEnabled = this.session.credentials?.final_refinement_enabled !== false
     if (!refineEnabled || !blob || blob.size < 64) {
-      this.refinedFinal = liveDraft
-      this.dispatch({ type: 'REFINED', text: liveDraft })
+      if (liveDraft.trim()) {
+        this.refinedFinal = liveDraft
+        this.dispatch({ type: 'REFINED', text: liveDraft })
+      } else {
+        this.refinedFinal = ''
+        this.dispatch({
+          type: 'REFINE_FAILED',
+          message:
+            'No speech was transcribed. Check the microphone, record again, or type the answer.',
+        })
+      }
       void reportVoiceMetrics({
         connection_duration_ms: connectionMs,
         time_to_first_delta_ms: ttfd,
@@ -466,7 +488,7 @@ export class RealtimeTranscriptionController {
         this.refinedFinal = result.transcript.trim()
         this.dispatch({ type: 'REFINED', text: this.refinedFinal })
         this.releaseAudioBlob()
-      } else {
+      } else if (liveDraft.trim()) {
         this.refinedFinal = liveDraft
         this.dispatch({
           type: 'REFINE_FAILED',
@@ -474,7 +496,14 @@ export class RealtimeTranscriptionController {
             result.warning ||
             'Using the live transcript. The optional accuracy pass was unavailable — edit if needed, then submit.',
         })
-        // Keep blob in memory for Retry refinement.
+      } else {
+        this.refinedFinal = ''
+        this.dispatch({
+          type: 'REFINE_FAILED',
+          message:
+            result.warning ||
+            'No speech was transcribed from the recording. Record again or type the answer.',
+        })
       }
       void reportVoiceMetrics({
         connection_duration_ms: connectionMs,
@@ -490,21 +519,62 @@ export class RealtimeTranscriptionController {
       }).catch(() => undefined)
     } catch (err) {
       reportClientFailure('refine', err)
-      this.refinedFinal = liveDraft
-      this.dispatch({
-        type: 'REFINE_FAILED',
-        message:
-          'Using the live transcript. The optional accuracy pass was unavailable — edit if needed, then submit.',
-      })
+      if (liveDraft.trim()) {
+        this.refinedFinal = liveDraft
+        this.dispatch({
+          type: 'REFINE_FAILED',
+          message:
+            'Using the live transcript. The optional accuracy pass was unavailable — edit if needed, then submit.',
+        })
+      } else {
+        this.refinedFinal = ''
+        this.dispatch({
+          type: 'REFINE_FAILED',
+          message: 'No speech was transcribed. Record again or type the answer.',
+        })
+      }
       void reportVoiceMetrics({
         refinement_failed: true,
         recording_duration_ms: recordingMs,
         transcript_item_count: itemCount(this.store),
+        empty_transcript: !liveDraft.trim(),
         device_label: this.session.deviceLabel,
       }).catch(() => undefined)
     } finally {
       this.teardownMedia()
     }
+  }
+
+  /**
+   * Commit the Realtime audio buffer and wait for delayed transcript events.
+   * Higher live_delay values need a longer wait before the peer is closed.
+   */
+  private async commitAndCollectLiveDraft(frozenBeforeCommit: string): Promise<string> {
+    const before = (displayAnswerText(this.store) || frozenBeforeCommit || '').trim()
+    try {
+      if (this.session.dc && this.session.dc.readyState === 'open') {
+        this.session.dc.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
+      }
+    } catch {
+      // ignore
+    }
+
+    const timeoutMs = postCommitWaitMs(this.session.credentials?.live_delay)
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      const current = (displayAnswerText(this.store) || '').trim()
+      // Prefer a completed/longer draft after commit; settle briefly once text appears.
+      if (current && (current !== before || current.length > before.length + 8)) {
+        await new Promise(r => setTimeout(r, 400))
+        return displayAnswerText(this.store) || current
+      }
+      if (current && Date.now() - started > Math.min(timeoutMs, 2000) && before && current === before) {
+        // Already had a live draft and nothing new arrived — keep it.
+        return current
+      }
+      await new Promise(r => setTimeout(r, 150))
+    }
+    return displayAnswerText(this.store) || frozenBeforeCommit || ''
   }
 
   async retryRefine() {
@@ -779,7 +849,7 @@ export class RealtimeTranscriptionController {
     const transcription: Record<string, unknown> = {
       model: 'gpt-live-transcribe',
       languages: ctx.languages?.length ? ctx.languages : credentials.languages?.length ? credentials.languages : ['en'],
-      delay: credentials.live_delay || 'high',
+      delay: credentials.live_delay || 'medium',
     }
     if (ctx.prompt) transcription.prompt = ctx.prompt.slice(0, 900)
     if (ctx.keywords?.length) transcription.keywords = ctx.keywords.slice(0, 40)
@@ -831,13 +901,23 @@ export class RealtimeTranscriptionController {
       if (type === 'error') {
         const message = event.error?.message || 'Realtime transcription error'
         reportClientFailure('realtime_event', new Error(message))
-        // Context hints are best-effort; keep the live session if prompt/keywords are rejected.
-        if (/prompt.*not supported|keywords.*not supported/i.test(message)) {
+        // Context / delay hints are best-effort; keep recording.
+        if (/prompt.*not supported|keywords.*not supported|delay.*not supported/i.test(message)) {
           return
         }
-        // Preserve local draft; do not wipe answer on non-fatal errors during listening.
+        const hasDraft = Boolean(liveDraftText(this.store))
+        const stillCapturing =
+          this.ctx.state === 'listening' ||
+          this.ctx.state === 'live_draft' ||
+          this.ctx.state === 'paused' ||
+          this.ctx.state === 'connecting' ||
+          this.ctx.state === 'finishing'
+        // With higher live_delay, draft text may not exist yet — do not abandon the take.
+        if (stillCapturing && !hasDraft) {
+          return
+        }
         this.dispatch({ type: 'ERROR', message })
-        if (!liveDraftText(this.store)) {
+        if (!hasDraft) {
           this.dispatch({ type: 'FALLBACK_TEXT' })
           this.teardownMedia()
         }

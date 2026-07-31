@@ -9,7 +9,7 @@ Set `OPENAI_API_KEY` in the environment / Secret. Never put the long-lived key i
 | Setting | Default | Use |
 | --- | --- | --- |
 | `OPENAI_ASSESSMENT_MODEL` | `gpt-5.6-terra` | Interview + scoring (Responses API) |
-| Live transcription | `gpt-live-transcribe` | Realtime WebRTC live draft (`turn_detection: null`, delay default `high`) |
+| Live transcription | `gpt-live-transcribe` | Realtime WebRTC live draft (`turn_detection: null`, delay default `medium`) |
 | Final transcription | `gpt-transcribe` | One-shot accuracy pass on finished MediaRecorder upload |
 | Text polish fallback | `gpt-4o-mini` | If audio refine fails, polish live draft for ASR/domain terms only |
 | `OPENAI_REASONING_EFFORT` | `medium` | Reasoning effort for assessment model |

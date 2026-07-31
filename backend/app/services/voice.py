@@ -150,7 +150,7 @@ class VoiceService:
             available_live_transcription_models=AVAILABLE_LIVE_TRANSCRIPTION_MODELS,
             available_final_transcription_models=AVAILABLE_FINAL_TRANSCRIPTION_MODELS,
             available_transcription_models=AVAILABLE_TRANSCRIPTION_MODELS,
-            live_delay=row.live_delay if row.live_delay in LIVE_DELAYS else "high",  # type: ignore[arg-type]
+            live_delay=row.live_delay if row.live_delay in LIVE_DELAYS else "medium",  # type: ignore[arg-type]
             expected_languages=self._parse_json_list(row.expected_languages_json) or ["en"],
             company_vocabulary=self._parse_json_list(row.company_vocabulary_json),
             final_refinement_enabled=bool(row.final_refinement_enabled),
@@ -331,7 +331,7 @@ class VoiceService:
             transcription_model=live_model,
             live_transcription_model=live_model,
             final_transcription_model=row.final_transcription_model or DEFAULT_FINAL_MODEL,
-            live_delay=row.live_delay or "high",
+            live_delay=row.live_delay or "medium",
             languages=ctx.languages,
             language=ctx.languages[0] if ctx.languages else None,
             stop_mode="manual",  # type: ignore[arg-type]
@@ -527,6 +527,7 @@ class VoiceService:
             )
 
         self.record_metrics(VoiceMetricsIn(refinement_failed=True, final_model=final_model))
+        empty_live = not (live_transcript or "").strip()
         return RefineTranscriptOut(
             transcript=live_transcript,
             model=final_model,
@@ -534,8 +535,12 @@ class VoiceService:
             refined=False,
             duration_ms=duration_ms,
             warning=(
-                "Using the live transcript. The optional accuracy pass was unavailable — "
-                "edit if needed, then submit."
+                "No speech was transcribed from the recording. Record again or type the answer."
+                if empty_live
+                else (
+                    "Using the live transcript. The optional accuracy pass was unavailable — "
+                    "edit if needed, then submit."
+                )
             ),
         )
 
@@ -998,7 +1003,7 @@ class VoiceService:
         transcription: dict[str, Any] = {"model": model}
         if model == "gpt-live-transcribe":
             transcription["languages"] = languages or ["en"]
-            transcription["delay"] = row.live_delay if row.live_delay in LIVE_DELAYS else "high"
+            transcription["delay"] = row.live_delay if row.live_delay in LIVE_DELAYS else "medium"
         elif languages:
             transcription["language"] = languages[0]
         elif row.voice_language and row.voice_language != "auto":

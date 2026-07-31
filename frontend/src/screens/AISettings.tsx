@@ -162,7 +162,7 @@ export default function AISettings({ dark, onNavigate }: Props) {
         setVoiceEnabled(data.voice_enabled)
         setLiveModel(data.live_transcription_model || data.transcription_model || 'gpt-live-transcribe')
         setFinalModel(data.final_transcription_model || 'gpt-transcribe')
-        setLiveDelay(data.live_delay || 'high')
+        setLiveDelay(data.live_delay || 'medium')
         setLanguages((data.expected_languages || ['en']).join(','))
         setCompanyVocabulary((data.company_vocabulary || []).join(', '))
         setFinalRefinement(data.final_refinement_enabled !== false)
@@ -263,7 +263,7 @@ export default function AISettings({ dark, onNavigate }: Props) {
 
           <SettingRow
             label="Live delay"
-            hint="For gpt-live-transcribe: higher delay = better word accuracy, slower partials. Default high. Temperature does not apply to transcription."
+            hint="For gpt-live-transcribe: higher delay = better word accuracy, slower partials. Default medium. Temperature does not apply to transcription."
             dark={dark}
           >
             <SelectField

@@ -31,7 +31,7 @@ class AiRuntimeSettings(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     final_transcription_model: Mapped[str] = mapped_column(
         String(120), nullable=False, default="gpt-transcribe"
     )
-    live_delay: Mapped[str] = mapped_column(String(16), nullable=False, default="high")
+    live_delay: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
     expected_languages_json: Mapped[str] = mapped_column(Text, nullable=False, default='["en"]')
     company_vocabulary_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     final_refinement_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

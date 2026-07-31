@@ -679,6 +679,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                   <p className="text-sm mb-1 font-medium" style={{ color: 'var(--foreground)' }}>{micCtx.statusLabel}</p>
                   <p className="text-sm mb-4" style={{ color: 'var(--muted-foreground)' }}>
                     Press the microphone to begin live draft transcription, or type below. Natural pauses will not end the answer.
+                    With a higher live-delay setting, text may appear a few seconds after you speak, and more of it after Finish.
                   </p>
                   <button
                     onClick={() => {
@@ -879,7 +880,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                   <p className="text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>{micCtx.statusLabel}</p>
                   <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)' }}>
                     {micCtx.state === 'finishing'
-                      ? 'Freezing the live draft…'
+                      ? 'Finishing — waiting for any delayed live transcript, then refining…'
                       : 'Running an optional accuracy pass on the recording. Your live draft is kept if that pass is unavailable.'}
                   </p>
                   <textarea

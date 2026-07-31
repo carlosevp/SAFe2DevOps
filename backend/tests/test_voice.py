@@ -39,8 +39,8 @@ def test_voice_settings_defaults_and_update(client: TestClient) -> None:
     assert body["live_transcription_model"] in body["available_live_transcription_models"]
     assert body["final_transcription_model"] in body["available_final_transcription_models"]
     assert body["live_delay"] in {"high", "medium", "low", "minimal", "xhigh"}
-    # Fresh defaults prefer high for live accuracy.
-    assert body["live_delay"] == "high"
+    # Fresh defaults prefer medium (accuracy vs snappy live draft).
+    assert body["live_delay"] == "medium"
     assert body["expected_languages"] == ["en"] or "en" in body["expected_languages"]
     assert body["final_refinement_enabled"] is True
     assert body["retain_source_audio"] is False
