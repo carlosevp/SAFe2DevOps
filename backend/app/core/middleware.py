@@ -43,7 +43,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        # Allow same-origin microphone for workshop WebRTC voice capture; keep camera/geo blocked.
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
         if self.enable_hsts:

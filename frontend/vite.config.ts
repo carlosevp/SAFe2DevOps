@@ -16,6 +16,10 @@ export default defineConfig(({ mode }) => {
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
     },
+    test: {
+      environment: 'node',
+      include: ['src/**/*.test.ts'],
+    },
     plugins: [
       react(),
       tailwindcss(),

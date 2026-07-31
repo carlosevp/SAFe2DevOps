@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Send, ChevronDown, ChevronUp, MessageSquare, CheckCircle2, AlertCircle, Coffee, Save, Users, Inbox,
+  Mic, Pause, RotateCcw, Square, Clock,
 } from 'lucide-react'
 import {
   getInterview,
@@ -10,9 +11,12 @@ import {
   startInterview,
   submitInterviewTurn,
   completeInterview,
+  getAiSettings,
   type InterviewSession,
   type TurnSubmitResult,
 } from '../lib/api'
+import { RealtimeTranscriptionController } from '../lib/realtimeTranscription'
+import { createMicContext, type MicContext } from '../lib/voiceStateMachine'
 import { REMOTE_CONTRIBUTIONS } from '../data/sampleData'
 import type { Screen, CoverageState } from '../types'
 
@@ -60,8 +64,51 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   const [coverageExpanded, setCoverageExpanded] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [voiceEnabled, setVoiceEnabled] = useState(true)
+  const [micCtx, setMicCtx] = useState<MicContext>(createMicContext())
+  const [elapsed, setElapsed] = useState(0)
+  const [typedNote, setTypedNote] = useState('')
+  const [privacyNotice, setPrivacyNotice] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastIdempotency = useRef<string | null>(null)
+  const voiceRef = useRef<RealtimeTranscriptionController | null>(null)
+
+  useEffect(() => {
+    getAiSettings()
+      .then(settings => {
+        setVoiceEnabled(settings.voice_enabled)
+        if (!settings.retain_source_audio) {
+          setPrivacyNotice('Audio is discarded after transcription. Only the editable transcript is kept.')
+        }
+      })
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const controller = new RealtimeTranscriptionController({
+      onContext: ctx => {
+        setMicCtx(ctx)
+        if (ctx.state === 'ready_to_edit' || ctx.state === 'fallback_text') {
+          const text = controller.getDisplayText()
+          if (text) setAnswerText(text)
+        } else if (ctx.state === 'listening' || ctx.state === 'paused' || ctx.state === 'reconnecting') {
+          setAnswerText(controller.getDisplayText())
+        }
+      },
+      onPrivacyNotice: notice => setPrivacyNotice(notice),
+    })
+    voiceRef.current = controller
+    const timer = setInterval(() => {
+      setElapsed(controller.elapsedSeconds)
+      setTick(t => t + 1)
+    }, 250)
+    return () => {
+      clearInterval(timer)
+      controller.discard()
+      voiceRef.current = null
+    }
+  }, [])
 
   const loadSession = useCallback(async () => {
     if (!assessmentId) {
@@ -358,36 +405,169 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
 
           {outcome === 'none' && (
             <div className="rounded-xl p-5" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
-              <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)' }}>
-                Type the team's response. You can edit freely before submitting.
-              </p>
-              <textarea
-                value={answerText}
-                onChange={e => setAnswerText(e.target.value)}
-                className="w-full rounded-lg p-3 text-sm outline-none resize-none"
-                style={{
-                  background: 'var(--muted)',
-                  border: '1px solid var(--border)',
-                  color: 'var(--foreground)',
-                  minHeight: 160,
-                  lineHeight: 1.7,
-                }}
-                placeholder="Capture the team's answer here…"
-                onFocus={e => (e.currentTarget.style.borderColor = 'var(--ring)')}
-                onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-              />
-              <div className="flex items-center justify-between mt-3">
-                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Autosaves as you type</span>
-                <button
-                  onClick={() => void handleSubmitAnswer()}
-                  disabled={!answerText.trim()}
-                  className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg font-medium transition-base"
-                  style={{ background: 'var(--primary)', color: '#fff', opacity: answerText.trim() ? 1 : 0.5 }}
-                >
-                  <Send size={11} />
-                  Submit response
-                </button>
-              </div>
+              {privacyNotice && (
+                <div className="mb-3 text-xs rounded-lg px-3 py-2" style={{ background: dark ? '#141f35' : '#f8fafc', color: 'var(--muted-foreground)', lineHeight: 1.5 }}>
+                  Recording privacy: {privacyNotice}
+                </div>
+              )}
+
+              {voiceEnabled && micCtx.state === 'idle' && (
+                <div className="text-center py-4">
+                  <p className="text-sm mb-4" style={{ color: 'var(--muted-foreground)' }}>
+                    Ready to listen. Press the microphone to begin, or type below.
+                  </p>
+                  <button
+                    onClick={() => void voiceRef.current?.start()}
+                    className="w-16 h-16 rounded-full flex items-center justify-center mx-auto transition-base"
+                    style={{ background: 'var(--primary)', color: '#fff' }}
+                  >
+                    <Mic size={26} />
+                  </button>
+                  <p className="text-xs mt-3" style={{ color: 'var(--muted-foreground)' }}>
+                    All voices in the room will be transcribed together
+                  </p>
+                </div>
+              )}
+
+              {(micCtx.state === 'requesting_permission' || micCtx.state === 'connecting' || micCtx.state === 'reconnecting') && (
+                <div className="text-center py-6">
+                  <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                    {micCtx.state === 'reconnecting' ? (micCtx.errorMessage || 'Reconnecting…') : 'Connecting microphone…'}
+                  </p>
+                </div>
+              )}
+
+              {(micCtx.state === 'listening' || micCtx.state === 'paused') && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{
+                          background: micCtx.state === 'listening' ? '#dc2626' : '#f59e0b',
+                          animation: micCtx.state === 'listening' ? 'pulse-ring 1.5s ease infinite' : 'none',
+                          boxShadow: micCtx.state === 'listening' ? '0 0 0 4px rgba(220,38,38,0.2)' : 'none',
+                        }}
+                      />
+                      <span className="text-xs font-medium" style={{ color: micCtx.state === 'listening' ? '#dc2626' : '#f59e0b' }}>
+                        {micCtx.state === 'listening' ? 'Listening…' : 'Paused'}
+                      </span>
+                    </div>
+                    <span className="text-xs font-mono" style={{ color: 'var(--muted-foreground)' }}>
+                      <Clock size={11} className="inline mr-1" />
+                      {String(Math.floor(elapsed / 60)).padStart(2, '0')}:{String(elapsed % 60).padStart(2, '0')}
+                      <span style={{ display: 'none' }}>{tick}</span>
+                    </span>
+                  </div>
+                  <textarea
+                    value={answerText}
+                    onChange={e => setAnswerText(e.target.value)}
+                    className="w-full rounded-lg p-3 text-sm outline-none resize-none"
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', minHeight: 140, lineHeight: 1.7 }}
+                    placeholder="Live transcript will appear here…"
+                  />
+                  <div className="flex items-center justify-between mt-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => (micCtx.state === 'listening' ? voiceRef.current?.pause() : voiceRef.current?.resume())}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg"
+                        style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
+                      >
+                        {micCtx.state === 'listening' ? <Pause size={12} /> : <Mic size={12} />}
+                        {micCtx.state === 'listening' ? 'Pause' : 'Resume'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          voiceRef.current?.discard()
+                          setAnswerText('')
+                          setElapsed(0)
+                        }}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg"
+                        style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', border: `1px solid ${cardBorder}` }}
+                      >
+                        <RotateCcw size={12} />
+                        Discard
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => void voiceRef.current?.finish()}
+                      className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg font-medium"
+                      style={{ background: 'var(--primary)', color: '#fff' }}
+                    >
+                      <Square size={11} />
+                      Finish response
+                    </button>
+                  </div>
+                  <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${cardBorder}` }}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={typedNote}
+                        onChange={e => setTypedNote(e.target.value)}
+                        placeholder="Append a typed note…"
+                        className="flex-1 text-sm px-3 py-2 rounded-lg outline-none"
+                        style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                      />
+                      <button
+                        onClick={() => {
+                          if (!typedNote.trim()) return
+                          voiceRef.current?.appendTypedNote(typedNote)
+                          setAnswerText(prev => [prev, typedNote.trim()].filter(Boolean).join('\n\n'))
+                          setTypedNote('')
+                        }}
+                        className="p-2 rounded-lg"
+                        style={{ background: 'var(--primary)', color: '#fff' }}
+                      >
+                        <Send size={13} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(micCtx.state === 'ready_to_edit' || micCtx.state === 'fallback_text' || micCtx.state === 'error' || (!voiceEnabled && micCtx.state === 'idle')) && (
+                <div>
+                  {(micCtx.state === 'fallback_text' || micCtx.state === 'error') && micCtx.errorMessage && (
+                    <p className="text-sm mb-3" style={{ color: '#d97706' }}>{micCtx.errorMessage}</p>
+                  )}
+                  <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)' }}>
+                    {micCtx.state === 'ready_to_edit'
+                      ? 'Review and edit the transcript, then submit when the host confirms it is complete.'
+                      : 'Type the team\'s response. You can edit freely before submitting.'}
+                  </p>
+                  <textarea
+                    value={answerText}
+                    onChange={e => setAnswerText(e.target.value)}
+                    className="w-full rounded-lg p-3 text-sm outline-none resize-none"
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', minHeight: 160, lineHeight: 1.7 }}
+                    placeholder="Capture the team's answer here…"
+                  />
+                  <div className="flex items-center justify-between mt-3">
+                    <div className="flex items-center gap-2">
+                      {voiceEnabled && (
+                        <button
+                          onClick={() => void voiceRef.current?.start()}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg"
+                          style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
+                        >
+                          <Mic size={12} />
+                          Record again
+                        </button>
+                      )}
+                      <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Autosaves as you type</span>
+                    </div>
+                    <button
+                      onClick={() => void handleSubmitAnswer()}
+                      disabled={!answerText.trim()}
+                      className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg font-medium transition-base"
+                      style={{ background: 'var(--primary)', color: '#fff', opacity: answerText.trim() ? 1 : 0.5 }}
+                    >
+                      <Send size={11} />
+                      Submit response
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

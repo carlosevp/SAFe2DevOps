@@ -16,6 +16,7 @@ from app.schemas.interview import (
 )
 from app.services.ai_settings import AVAILABLE_EFFORTS, AVAILABLE_MODELS, AiSettingsService
 from app.services.interview import InterviewService
+from app.services.voice import VoiceService
 
 router = APIRouter(tags=["interview"])
 
@@ -115,11 +116,7 @@ def complete_interview(
     return session
 
 
-@router.get("/ai-settings", response_model=AiSettingsOut)
-def get_ai_settings(
-    _: dict[str, str] = Depends(require_admin_or_dev_mock),
-    db: Session = Depends(get_db_session),
-) -> AiSettingsOut:
+def _ai_settings_out(db: Session) -> AiSettingsOut:
     service = AiSettingsService(db)
     row = service.get()
     return AiSettingsOut(
@@ -130,8 +127,24 @@ def get_ai_settings(
         prompt_config_version=service.prompt_config_version(),
         available_models=AVAILABLE_MODELS,
         available_reasoning_efforts=AVAILABLE_EFFORTS,
+        voice_enabled=bool(row.voice_enabled),
+        voice_language=row.voice_language,
+        voice_stop_mode=row.voice_stop_mode,  # type: ignore[arg-type]
+        silence_timeout_ms=row.silence_timeout_ms,
+        max_recording_seconds=row.max_recording_seconds,
+        retain_source_audio=bool(row.retain_source_audio),
+        retain_corrected_transcript=bool(row.retain_corrected_transcript),
+        remote_voice_enabled=bool(row.remote_voice_enabled),
         updated_at=row.updated_at,
     )
+
+
+@router.get("/ai-settings", response_model=AiSettingsOut)
+def get_ai_settings(
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> AiSettingsOut:
+    return _ai_settings_out(db)
 
 
 @router.put("/ai-settings", response_model=AiSettingsOut)
@@ -141,20 +154,24 @@ def update_ai_settings(
     db: Session = Depends(get_db_session),
 ) -> AiSettingsOut:
     service = AiSettingsService(db)
-    row = service.update(
+    service.update(
         assessment_model=body.assessment_model,
         reasoning_effort=body.reasoning_effort,
         interview_provider=body.interview_provider,
         actor=admin.get("subject", "admin"),
     )
+    voice_fields = {
+        "transcription_model": body.transcription_model,
+        "voice_enabled": body.voice_enabled,
+        "voice_language": body.voice_language,
+        "voice_stop_mode": body.voice_stop_mode,
+        "silence_timeout_ms": body.silence_timeout_ms,
+        "max_recording_seconds": body.max_recording_seconds,
+        "retain_source_audio": body.retain_source_audio,
+        "retain_corrected_transcript": body.retain_corrected_transcript,
+        "remote_voice_enabled": body.remote_voice_enabled,
+    }
+    if any(v is not None for v in voice_fields.values()):
+        VoiceService(db).update_voice_settings(**voice_fields)
     db.commit()
-    return AiSettingsOut(
-        assessment_model=row.assessment_model,
-        reasoning_effort=row.reasoning_effort,
-        interview_provider=row.interview_provider,  # type: ignore[arg-type]
-        transcription_model=row.transcription_model,
-        prompt_config_version=service.prompt_config_version(),
-        available_models=AVAILABLE_MODELS,
-        available_reasoning_efforts=AVAILABLE_EFFORTS,
-        updated_at=row.updated_at,
-    )
+    return _ai_settings_out(db)

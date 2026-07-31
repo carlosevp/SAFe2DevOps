@@ -137,6 +137,14 @@ class AiSettingsOut(StrictSchema):
     prompt_config_version: str
     available_models: list[str]
     available_reasoning_efforts: list[str]
+    voice_enabled: bool = True
+    voice_language: str = "auto"
+    voice_stop_mode: Literal["manual", "vad"] = "manual"
+    silence_timeout_ms: int = 1500
+    max_recording_seconds: int = 900
+    retain_source_audio: bool = False
+    retain_corrected_transcript: bool = True
+    remote_voice_enabled: bool = False
     updated_at: datetime | None = None
 
 
@@ -144,6 +152,15 @@ class AiSettingsUpdate(StrictSchema):
     assessment_model: str | None = None
     reasoning_effort: str | None = None
     interview_provider: Literal["mock", "live"] | None = None
+    transcription_model: str | None = None
+    voice_enabled: bool | None = None
+    voice_language: str | None = None
+    voice_stop_mode: Literal["manual", "vad"] | None = None
+    silence_timeout_ms: int | None = None
+    max_recording_seconds: int | None = None
+    retain_source_audio: bool | None = None
+    retain_corrected_transcript: bool | None = None
+    remote_voice_enabled: bool | None = None
 
 
 class InterviewStartOut(StrictSchema):

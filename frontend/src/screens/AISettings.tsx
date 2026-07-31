@@ -93,14 +93,29 @@ function SelectField({
   )
 }
 
-function NumberField({ defaultValue, min, max, suffix }: { defaultValue: number; min: number; max: number; suffix?: string }) {
+function NumberField({
+  value,
+  defaultValue,
+  min,
+  max,
+  suffix,
+  onChange,
+}: {
+  value?: number
+  defaultValue?: number
+  min: number
+  max: number
+  suffix?: string
+  onChange?: (v: number) => void
+}) {
   return (
     <div className="flex items-center gap-2">
       <input
         type="number"
-        defaultValue={defaultValue}
+        {...(value !== undefined ? { value } : { defaultValue })}
         min={min}
         max={max}
+        onChange={e => onChange?.(Number(e.target.value))}
         className="w-16 rounded-lg px-2.5 py-1.5 text-sm text-right outline-none font-mono"
         style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
         onFocus={e => (e.currentTarget.style.borderColor = 'var(--ring)')}
@@ -112,12 +127,16 @@ function NumberField({ defaultValue, min, max, suffix }: { defaultValue: number;
 }
 
 export default function AISettings({ dark, onNavigate }: Props) {
-  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [voiceEnabled, setVoiceEnabled] = useState(true)
   const [retainAudio, setRetainAudio] = useState(false)
   const [retainTranscript, setRetainTranscript] = useState(true)
   const [remoteVoice, setRemoteVoice] = useState(false)
   const [adminRequired, setAdminRequired] = useState(true)
-  const [vadEnabled, setVadEnabled] = useState(true)
+  const [vadEnabled, setVadEnabled] = useState(false)
+  const [silenceSec, setSilenceSec] = useState(2)
+  const [maxMinutes, setMaxMinutes] = useState(15)
+  const [transcriptionModel, setTranscriptionModel] = useState('gpt-realtime-whisper')
+  const [language, setLanguage] = useState('auto')
   const [saved, setSaved] = useState(false)
   const [model, setModel] = useState('gpt-5.6-terra')
   const [effort, setEffort] = useState('medium')
@@ -135,6 +154,15 @@ export default function AISettings({ dark, onNavigate }: Props) {
         setProvider(data.interview_provider)
         setModels(data.available_models)
         setEfforts(data.available_reasoning_efforts)
+        setVoiceEnabled(data.voice_enabled)
+        setTranscriptionModel(data.transcription_model)
+        setLanguage(data.voice_language === 'en-US' ? 'en' : data.voice_language)
+        setVadEnabled(data.voice_stop_mode === 'vad')
+        setSilenceSec(Math.round(data.silence_timeout_ms / 1000) || 2)
+        setMaxMinutes(Math.round(data.max_recording_seconds / 60) || 15)
+        setRetainAudio(data.retain_source_audio)
+        setRetainTranscript(data.retain_corrected_transcript)
+        setRemoteVoice(data.remote_voice_enabled)
       })
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load AI settings'))
   }, [])
@@ -146,6 +174,15 @@ export default function AISettings({ dark, onNavigate }: Props) {
         assessment_model: model,
         reasoning_effort: effort,
         interview_provider: provider,
+        transcription_model: transcriptionModel,
+        voice_enabled: voiceEnabled,
+        voice_language: language === 'Auto-detect' ? 'auto' : language,
+        voice_stop_mode: vadEnabled ? 'vad' : 'manual',
+        silence_timeout_ms: Math.max(200, silenceSec * 1000),
+        max_recording_seconds: Math.max(30, maxMinutes * 60),
+        retain_source_audio: retainAudio,
+        retain_corrected_transcript: retainTranscript,
+        remote_voice_enabled: remoteVoice,
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
@@ -180,15 +217,23 @@ export default function AISettings({ dark, onNavigate }: Props) {
             <Toggle checked={voiceEnabled} onChange={setVoiceEnabled} />
           </SettingRow>
 
-          <SettingRow label="Transcription model" hint="Higher accuracy models have longer latency." dark={dark}>
-            <SelectField options={['Whisper large-v3', 'Whisper medium', 'Whisper small (fast)']} defaultValue="Whisper large-v3" />
+          <SettingRow label="Transcription model" hint="Default is gpt-realtime-whisper for OpenAI Realtime WebRTC transcription." dark={dark}>
+            <SelectField
+              options={['gpt-realtime-whisper', 'gpt-live-transcribe', 'gpt-4o-transcribe', 'whisper-1']}
+              value={transcriptionModel}
+              onChange={setTranscriptionModel}
+            />
           </SettingRow>
 
           <SettingRow label="Language" hint="Auto-detect works well for English-primary sessions." dark={dark}>
-            <SelectField options={['Auto-detect', 'English', 'German', 'Spanish', 'French']} />
+            <SelectField
+              options={['auto', 'en', 'de', 'es', 'fr']}
+              value={language}
+              onChange={setLanguage}
+            />
           </SettingRow>
 
-          <SettingRow label="Stop detection" hint="Voice-activity detection ends recording automatically on silence." dark={dark}>
+          <SettingRow label="Stop detection" hint="Manual stop keeps the host in control. VAD ends a turn after silence." dark={dark}>
             <div className="flex items-center gap-3">
               <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>VAD</span>
               <Toggle checked={vadEnabled} onChange={setVadEnabled} />
@@ -196,11 +241,11 @@ export default function AISettings({ dark, onNavigate }: Props) {
           </SettingRow>
 
           <SettingRow label="Silence timeout" hint="Seconds of silence before VAD stops recording." dark={dark}>
-            <NumberField defaultValue={4} min={2} max={30} suffix="sec" />
+            <NumberField value={silenceSec} min={1} max={30} suffix="sec" onChange={setSilenceSec} />
           </SettingRow>
 
           <SettingRow label="Maximum recording length" hint="Hard limit per response." dark={dark}>
-            <NumberField defaultValue={15} min={3} max={60} suffix="min" />
+            <NumberField value={maxMinutes} min={1} max={60} suffix="min" onChange={setMaxMinutes} />
           </SettingRow>
 
           <SettingRow label="Retain audio after transcription" hint="Disabled by default. Enable only if required for audit purposes." dark={dark}>

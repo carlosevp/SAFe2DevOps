@@ -15,7 +15,7 @@ from app.models.enums import (
 )
 from app.models.evidence import EvidenceExclusion, EvidenceLimitation, EvidenceMetric, EvidenceSnapshot
 from app.models.integration import IntegrationConfiguration
-from app.models.ai_settings import AiRuntimeSettings, InterviewSession
+from app.models.ai_settings import AiRuntimeSettings, InterviewSession, VoiceTempAudio
 from app.models.interview import InterviewTurn
 from app.models.practice import PracticeCoverage
 from app.models.remote import RemoteContribution, RemoteContributor
@@ -50,4 +50,5 @@ __all__ = [
     "RemoteContribution",
     "RemoteContributionStatus",
     "RemoteContributor",
+    "VoiceTempAudio",
 ]

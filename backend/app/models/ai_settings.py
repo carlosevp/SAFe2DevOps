@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -19,7 +19,27 @@ class AiRuntimeSettings(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     reasoning_effort: Mapped[str] = mapped_column(String(40), nullable=False, default="medium")
     interview_provider: Mapped[str] = mapped_column(String(16), nullable=False, default="mock")
     transcription_model: Mapped[str] = mapped_column(String(120), nullable=False, default="gpt-realtime-whisper")
+    voice_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    voice_language: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
+    voice_stop_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
+    silence_timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=1500)
+    max_recording_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=900)
+    retain_source_audio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    retain_corrected_transcript: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    remote_voice_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class VoiceTempAudio(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Tracks ephemeral or explicitly retained voice capture files."""
+
+    __tablename__ = "voice_temp_audio"
+
+    assessment_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    path: Mapped[str] = mapped_column(String(500), nullable=False)
+    retained: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cleaned_up: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class InterviewSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):

@@ -279,7 +279,35 @@ export type AiSettings = {
   prompt_config_version: string
   available_models: string[]
   available_reasoning_efforts: string[]
+  voice_enabled: boolean
+  voice_language: string
+  voice_stop_mode: 'manual' | 'vad'
+  silence_timeout_ms: number
+  max_recording_seconds: number
+  retain_source_audio: boolean
+  retain_corrected_transcript: boolean
+  remote_voice_enabled: boolean
   updated_at: string | null
+}
+
+export type RealtimeSessionCredentials = {
+  client_secret: string
+  expires_at: string
+  provider: 'mock' | 'live'
+  realtime_calls_url: string
+  transcription_model: string
+  language: string | null
+  stop_mode: 'manual' | 'vad'
+  silence_timeout_ms: number
+  max_recording_seconds: number
+  voice_enabled: boolean
+  session_config: Record<string, unknown>
+  privacy: {
+    retain_source_audio: boolean
+    retain_corrected_transcript: boolean
+    storage_mode: string
+    privacy_notice: string
+  }
 }
 
 export function startInterview(assessmentId: string) {
@@ -334,6 +362,36 @@ export function updateAiSettings(body: {
   assessment_model?: string
   reasoning_effort?: string
   interview_provider?: 'mock' | 'live'
+  transcription_model?: string
+  voice_enabled?: boolean
+  voice_language?: string
+  voice_stop_mode?: 'manual' | 'vad'
+  silence_timeout_ms?: number
+  max_recording_seconds?: number
+  retain_source_audio?: boolean
+  retain_corrected_transcript?: boolean
+  remote_voice_enabled?: boolean
 }) {
   return apiFetch<AiSettings>('/api/ai-settings', { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export function createRealtimeSession() {
+  return apiFetch<RealtimeSessionCredentials>('/api/voice/realtime-session', { method: 'POST' })
+}
+
+export function registerTempVoiceAudio(assessmentId?: string | null) {
+  return apiFetch<{ id: string; path_label: string; retained: boolean; expires_at: string; cleaned_up: boolean }>(
+    '/api/voice/audio/temp',
+    {
+      method: 'POST',
+      body: JSON.stringify({ assessment_id: assessmentId || null, filename: 'capture.webm' }),
+    },
+  )
+}
+
+export function cleanupTempVoiceAudio(audioId: string, force = false) {
+  const q = force ? '?force=true' : ''
+  return apiFetch<{ id: string; cleaned_up: boolean; removed: boolean }>(`/api/voice/audio/${audioId}${q}`, {
+    method: 'DELETE',
+  })
 }
