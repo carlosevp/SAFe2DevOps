@@ -1,0 +1,15 @@
+---
+description: Product scope for the SAFe DevOps Adaptive Assessment
+alwaysApply: true
+---
+
+# Product scope
+
+- Product: adaptive SAFe DevOps maturity assessment across 16 practices
+- Figma frontend in `src/` is the UX source of truth
+- Pilot limits: one Jira Cloud env, one Azure DevOps Services env
+- Per assessment: one representative Jira project + one ADO repository
+- Core flows: evidence snapshot, voice workshop, remote typed contributors, adaptive next question, admin review, published radar/heatmap/report/plan
+- Deploy: Railway for testing, OpenShift for final
+- Storage: SQLite on persistent mount; exactly one app replica
+- Do not expand into multi-environment or multi-replica designs without an ADR

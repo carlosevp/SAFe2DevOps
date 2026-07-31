@@ -1,0 +1,15 @@
+---
+description: Jira Cloud and Azure DevOps integration rules
+globs: "**/*{jira,azdo,azure,integration}*"
+alwaysApply: false
+---
+
+# Integrations
+
+- Exactly one Jira Cloud environment and one Azure DevOps Services environment in the pilot
+- Per assessment: one representative Jira project and one ADO repository
+- Credentials encrypted/server-side; never echo full secrets after save
+- Use read-only scopes only
+- Evidence collection is snapshot-based for a lookback window, not continuous sync sprawl
+- Test-connection and project/repo refresh are backend operations with clear error states
+- Frontend `Integrations` / `SetupWizard` / `EvidencePreview` screens define the UX contract

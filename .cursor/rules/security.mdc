@@ -1,0 +1,14 @@
+---
+description: Security rules for secrets, auth, and data handling
+alwaysApply: true
+---
+
+# Security
+
+- Never commit `.env`, tokens, PATs, API keys, SQLite files, uploads, or exports
+- Jira/ADO/OpenAI secrets are server-side only; mask after save in UI
+- Do not log credentials, raw Authorization headers, or full transcripts to insecure sinks
+- Least-privilege read scopes for Jira and Azure DevOps
+- Unpublished assessments and admin APIs require authorization
+- Treat workshop transcripts and remote contributions as sensitive data
+- Use platform secret injection on Railway and OpenShift

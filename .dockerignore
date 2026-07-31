@@ -1,0 +1,56 @@
+# Git and VCS
+.git
+.gitignore
+.gitattributes
+
+# Dependencies and build
+node_modules
+dist
+build
+out
+coverage
+.pnpm-store
+.vite
+.cache
+.tmp-*
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+data
+uploads
+exports
+logs
+*.log
+
+# Docs and editor (not needed in runtime image)
+.cursor
+.vscode
+.idea
+*.md
+!README.md
+docs
+AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
+SECURITY.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python local
+.venv
+venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache

@@ -1,0 +1,16 @@
+---
+description: Python quality standards for the future API
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python quality
+
+- Target modern Python (3.12+) with type hints on public functions
+- Keep modules small: routers / services / repositories separated
+- Use explicit settings from environment variables; never hardcode secrets
+- Prefer clear domain errors over bare exceptions
+- Add migrations for every schema change
+- No network calls inside request handlers without timeouts
+- Format/lint with the repo-standard tools once introduced (ruff/mypy or equivalent)
+- Do not add backend code during Phase 0 bootstrap

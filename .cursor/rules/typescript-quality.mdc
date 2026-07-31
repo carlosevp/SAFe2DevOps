@@ -1,0 +1,15 @@
+---
+description: TypeScript and React quality for the Figma frontend
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# TypeScript quality
+
+- Keep `strict` TypeScript; do not weaken `tsconfig` to hide errors
+- Prefer explicit props interfaces colocated with components
+- Shared screen union and domain types live in `src/types.ts`
+- Avoid `any`; use narrow unions for screen keys and coverage states
+- Do not add `useMemo`/`useCallback` by default
+- Run `pnpm exec tsc --noEmit` and `pnpm run build` after substantive UI changes
+- Keep apostrophe-safe string quoting to protect the Vite build

@@ -1,0 +1,15 @@
+---
+description: Target architecture constraints
+alwaysApply: true
+---
+
+# Architecture
+
+- Frontend: React 19 + Vite + TypeScript + Tailwind v4
+- Backend: Python API (not implemented in Phase 0)
+- Integrations: Jira Cloud + Azure DevOps Services, read-only, server-side credentials
+- AI: OpenAI for transcription assist, adaptive questioning, draft scoring
+- Persistence: SQLite on mounted volume via `DATABASE_PATH`
+- Scale: single replica while SQLite is used
+- Follow `docs/target-architecture.md` and ADRs under `docs/decisions/`
+- Prefer vertical slices that replace one mocked screen at a time

@@ -1,13 +1,67 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build output
 dist/
 build/
-.cache/
-.env*
-.vite/
-vite.config.*.timestamp-*
+out/
+coverage/
 *.tsbuildinfo
-*-debug.log*
-logs/
-*.log
-.claude-replay.*
+
+# Vite / caches
+.vite/
+.cache/
+.turbo/
 .tmp-*
+vite.config.*.timestamp-*
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env*.example
+*.pem
+*.key
+credentials.json
+service-account.json
+
+# Local data / persistence
+*.db
+*.sqlite
+*.sqlite3
+/data/
+/uploads/
+/exports/
+/logs/
+*.log
+*-debug.log*
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Test / tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Figma Make local replay / tooling noise
+.claude-replay.*
+
+# Container / deploy local
+.docker/
+*.local

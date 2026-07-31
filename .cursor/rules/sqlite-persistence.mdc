@@ -1,0 +1,15 @@
+---
+description: SQLite persistence and single-replica constraints
+globs: "**/*{db,sqlite,migration,storage}*"
+alwaysApply: false
+---
+
+# SQLite persistence
+
+- Database file path from `DATABASE_PATH` on mounted persistent storage
+- Never commit `*.sqlite*` or bake DB files into images
+- Enforce one application replica while SQLite is used
+- Create parent directories on startup; run migrations before serving traffic
+- Use a single-writer assumption; no multi-instance write sharing
+- Prefer explicit schema migrations over ad-hoc ALTER in request paths
+- See `docs/decisions/ADR-002-sqlite-persistent-storage.md`

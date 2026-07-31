@@ -1,0 +1,15 @@
+---
+description: OpenAI usage guidelines for assessment AI features
+globs: "**/*{openai,ai,llm}*"
+alwaysApply: false
+---
+
+# OpenAI integration
+
+- Keys only from environment (`OPENAI_API_KEY`); never embed in frontend
+- Use models configured via env (`OPENAI_MODEL`, `OPENAI_TRANSCRIPTION_MODEL`)
+- Prompts must not instruct disclosure of system secrets or other tenants' data
+- Persist model outputs needed for audit (draft scores, rationales) with timestamps
+- Adaptive questioning should prefer coverage gaps + evidence over generic chat
+- Handle rate limits/timeouts; fail closed to a safe facilitator fallback question
+- Do not send more transcript/evidence than needed for the current step

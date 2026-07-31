@@ -1,0 +1,15 @@
+---
+description: Preserve Figma Make frontend fidelity
+globs: src/**/*.{ts,tsx,css}
+alwaysApply: false
+---
+
+# Frontend / Figma fidelity
+
+- Treat `src/screens/*`, `src/components/*`, and `src/index.css` tokens as the design source of truth
+- Do not redesign layout, copy tone, or interaction patterns unless the phase explicitly includes UI work
+- Replace mocks by wiring the same screens to APIs; keep sample data in `src/data/` until removed intentionally
+- Prefer Tailwind utilities and existing CSS variables over new parallel design systems
+- Export components as default exports (project convention)
+- Use double quotes for strings containing apostrophes to avoid build breaks
+- Fix only build-blocking issues during bootstrap/foundation unless asked otherwise

@@ -1,0 +1,13 @@
+---
+description: Testing expectations across phases
+alwaysApply: false
+---
+
+# Testing
+
+- Phase 0: `pnpm exec tsc --noEmit` and `pnpm run build` must pass
+- Prefer tests that lock critical user journeys over broad snapshot churn
+- When backend lands: unit tests for scoring/coverage pure logic; API tests for authz and publish gate
+- Integration tests for Jira/ADO should use recorded fixtures or sandboxes — never real customer PATs in CI
+- Keep one-replica SQLite constraints covered in deploy config tests when added
+- Do not block Phase 0 on a full test harness

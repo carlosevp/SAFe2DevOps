@@ -1,0 +1,15 @@
+---
+description: Railway and OpenShift deployment constraints
+globs: "**/*{Dockerfile,docker-compose,railway,openshift,k8s,deploy}*"
+alwaysApply: false
+---
+
+# Railway / OpenShift deployment
+
+- Railway = testing; OpenShift = final deployment target
+- Mount persistent storage for SQLite; set `DATABASE_PATH` accordingly
+- `replicas: 1` (or equivalent) while SQLite remains the store
+- Inject secrets via platform secret mechanisms, not image env baked at build time
+- Health endpoint required for platform probes
+- Do not publish containers that include `.env`, `node_modules` caches, or local DB files
+- Keep `.dockerignore` aligned with secret/build exclusions

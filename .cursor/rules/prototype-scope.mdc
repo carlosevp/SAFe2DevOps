@@ -1,0 +1,13 @@
+---
+description: Keep Phase 0/prototype work within bootstrap scope
+alwaysApply: true
+---
+
+# Prototype scope
+
+- Phase 0 delivers hygiene, docs, rules, and a building Figma frontend only
+- Do not implement backend business logic, real Jira/ADO clients, or OpenAI calls in Phase 0
+- Do not delete Figma source files (`.figma/`, screens, tokens)
+- Do not rewrite Git history without explicitly reporting first
+- Leave mocked handlers in place until the matching implementation phase
+- Prefer documentation and safe scaffolding over speculative abstractions
