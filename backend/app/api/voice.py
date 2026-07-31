@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, require_admin_or_dev_mock
@@ -46,6 +47,20 @@ def create_realtime_session(
     out = service.create_realtime_session(actor=admin.get("subject", "admin"))
     db.commit()
     return out
+
+
+@router.post("/realtime-call")
+async def exchange_realtime_call(
+    request: Request,
+    admin: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> PlainTextResponse:
+    """Server-mediated WebRTC SDP exchange with OpenAI (keeps API key server-side)."""
+    offer = (await request.body()).decode("utf-8", errors="replace")
+    service = VoiceService(db)
+    answer = service.exchange_realtime_sdp(offer, actor=admin.get("subject", "admin"))
+    db.commit()
+    return PlainTextResponse(content=answer, media_type="application/sdp")
 
 
 @router.post("/audio/temp", response_model=TempAudioOut)

@@ -18,7 +18,9 @@ from app.repositories.assessment import AssessmentRepository
 from app.services.audit import AuditService
 from app.services.lifecycle import LifecycleService
 
-_SOURCE_SKIP_TOKENS = frozenset({"", "__none__", "none", "skip", "n/a", "na"})
+_SOURCE_SKIP_TOKENS = frozenset(
+    {"", "__none__", "none", "skip", "n/a", "na", "interview_only", "interview-only"}
+)
 
 
 def _normalize_optional_source(value: object) -> str:

@@ -9,7 +9,7 @@ Set `OPENAI_API_KEY` in the environment / Secret. Never put the long-lived key i
 | Setting | Default | Use |
 | --- | --- | --- |
 | `OPENAI_ASSESSMENT_MODEL` | `gpt-5.6-terra` | Interview + scoring (Responses API) |
-| `OPENAI_TRANSCRIPTION_MODEL` | `gpt-live-transcribe` | Realtime WebRTC voice (use `gpt-realtime-whisper` only with manual stop; it rejects VAD) |
+| `OPENAI_TRANSCRIPTION_MODEL` | `gpt-4o-transcribe` | Realtime WebRTC voice via server-mediated SDP exchange (`gpt-realtime-whisper` requires manual stop / no VAD) |
 | `OPENAI_REASONING_EFFORT` | `medium` | Reasoning effort for assessment model |
 
 Runtime AI/voice settings can also be adjusted in **AI settings** (persisted server-side).

@@ -1,4 +1,4 @@
-import { createRealtimeSession, type RealtimeSessionCredentials } from './api'
+import { createRealtimeSession, exchangeRealtimeCall, type RealtimeSessionCredentials } from './api'
 import {
   createMicContext,
   displayTranscript,
@@ -29,6 +29,26 @@ const MOCK_SCRIPT =
   'Jordan: We pick up a card after planning and work in a feature branch.\n\n' +
   'Sam: The pipeline runs unit tests on every pull request before merge.\n\n' +
   'Alex: After merge, CI deploys to staging and we manually promote to production while watching dashboards.'
+
+function mediaErrorMessage(err: unknown): string {
+  if (err instanceof DOMException) {
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      return 'Microphone permission denied. Continue with typed response.'
+    }
+    if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      return 'No microphone found. Continue with typed response.'
+    }
+    if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+      return 'Microphone is already in use by another application.'
+    }
+    if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+      return 'Microphone constraints are not supported on this device. Try typed response.'
+    }
+    return err.message || err.name
+  }
+  if (err instanceof Error) return err.message
+  return 'Failed to start voice capture'
+}
 
 export class RealtimeTranscriptionController {
   private ctx: MicContext = createMicContext()
@@ -81,6 +101,7 @@ export class RealtimeTranscriptionController {
         return
       }
 
+      // Keep constraints minimal — object constraints are a common "Invalid constraint" source.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       this.session.stream = stream
       this.dispatch({ type: 'PERMISSION_GRANTED' })
@@ -92,7 +113,7 @@ export class RealtimeTranscriptionController {
       }
       this.beginTimers()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to start voice capture'
+      const message = mediaErrorMessage(err)
       if (/Permission|NotAllowed|Denied/i.test(message)) {
         this.dispatch({ type: 'PERMISSION_DENIED', message })
       } else {
@@ -127,7 +148,6 @@ export class RealtimeTranscriptionController {
   async finish() {
     if (this.ctx.state !== 'listening' && this.ctx.state !== 'paused') return
     this.dispatch({ type: 'FINISH' })
-    // Commit audio turn for manual stop mode when live data channel exists.
     try {
       if (this.session.dc && this.session.dc.readyState === 'open') {
         this.session.dc.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
@@ -151,7 +171,6 @@ export class RealtimeTranscriptionController {
     const cleaned = note.trim()
     if (!cleaned) return
     this.typedNoteBuffer = [this.typedNoteBuffer, cleaned].filter(Boolean).join('\n')
-    // Surface into editable transcript when ready.
     if (this.ctx.state === 'ready_to_edit' || this.ctx.state === 'fallback_text' || this.ctx.state === 'idle') {
       const merged = [this.ctx.finalTranscript, cleaned].filter(Boolean).join('\n\n')
       this.ctx = { ...this.ctx, finalTranscript: merged }
@@ -198,14 +217,17 @@ export class RealtimeTranscriptionController {
         this.dispatch({ type: 'FINAL_SEGMENT', text: MOCK_SCRIPT })
       }
     }, 80)
-    // Keep stream reference for pause/resume track toggling.
     void stream
   }
 
   private async startLive(credentials: RealtimeSessionCredentials, stream: MediaStream) {
     const pc = new RTCPeerConnection()
     this.session.pc = pc
-    stream.getTracks().forEach(track => pc.addTrack(track, stream))
+    const audioTrack = stream.getAudioTracks()[0]
+    if (!audioTrack) {
+      throw new Error('No audio track available from the microphone')
+    }
+    pc.addTrack(audioTrack, stream)
 
     const dc = pc.createDataChannel('oai-events')
     this.session.dc = dc
@@ -221,28 +243,12 @@ export class RealtimeTranscriptionController {
 
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
-    const sdpResponse = await fetch(credentials.realtime_calls_url, {
-      method: 'POST',
-      body: offer.sdp || '',
-      headers: {
-        Authorization: `Bearer ${credentials.client_secret}`,
-        'Content-Type': 'application/sdp',
-      },
-    })
-    if (!sdpResponse.ok) {
-      const body = await sdpResponse.text()
-      if (sdpResponse.status === 401 || sdpResponse.status === 403) {
-        this.dispatch({ type: 'SESSION_EXPIRED' })
-        void this.recover()
-        return
-      }
-      throw new Error(body.slice(0, 200) || `Realtime call failed (${sdpResponse.status})`)
-    }
-    const answer = { type: 'answer' as const, sdp: await sdpResponse.text() }
-    await pc.setRemoteDescription(answer)
+
+    // Server-mediated SDP exchange keeps the OpenAI key off the browser and logs failures.
+    const answerSdp = await exchangeRealtimeCall(offer.sdp || '')
+    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
     this.dispatch({ type: 'CONNECTED' })
-    // Session config is applied when minting the ephemeral secret. Re-sending
-    // session.update over WebRTC can fail with "Invalid constraint" on some models.
+    void credentials
   }
 
   private handleServerEvent(raw: string) {
@@ -287,15 +293,6 @@ export class RealtimeTranscriptionController {
       this.elapsedSeconds = Math.max(0, Math.floor(ms / 1000))
       if (this.elapsedSeconds >= this.session.maxSeconds) {
         void this.finish()
-      }
-      // Expire near credential lifetime ~60s: request reconnect before hard fail when listening long.
-      const cred = this.session.credentials
-      if (cred && this.ctx.state === 'listening') {
-        const expiresMs = new Date(cred.expires_at).getTime() - Date.now()
-        if (expiresMs < 5_000 && expiresMs > 0) {
-          this.dispatch({ type: 'SESSION_EXPIRED' })
-          void this.recover()
-        }
       }
     }, 250)
   }

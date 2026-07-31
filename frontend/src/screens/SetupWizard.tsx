@@ -125,6 +125,57 @@ function SelectField({
   )
 }
 
+function SourceModeChoice({
+  dark,
+  interviewOnly,
+  onChange,
+  toolLabel,
+}: {
+  dark: boolean
+  interviewOnly: boolean
+  onChange: (interviewOnly: boolean) => void
+  toolLabel: string
+}) {
+  const border = dark ? '#1e3358' : '#e2e8f0'
+  const active = 'var(--primary)'
+  return (
+    <div className="grid sm:grid-cols-2 gap-3">
+      <button
+        type="button"
+        onClick={() => onChange(false)}
+        className="rounded-xl px-4 py-3 text-left transition-base"
+        style={{
+          border: `2px solid ${interviewOnly ? border : active}`,
+          background: interviewOnly ? 'var(--card)' : dark ? '#0f1d40' : '#eef3fa',
+        }}
+      >
+        <div className="text-sm font-semibold mb-1" style={{ color: 'var(--foreground)' }}>
+          Use a {toolLabel} project
+        </div>
+        <p className="text-xs" style={{ color: 'var(--muted-foreground)', lineHeight: 1.5 }}>
+          Pull representative evidence from the catalog for this assessment.
+        </p>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange(true)}
+        className="rounded-xl px-4 py-3 text-left transition-base"
+        style={{
+          border: `2px solid ${interviewOnly ? active : border}`,
+          background: interviewOnly ? (dark ? '#0f1d40' : '#eef3fa') : 'var(--card)',
+        }}
+      >
+        <div className="text-sm font-semibold mb-1" style={{ color: 'var(--foreground)' }}>
+          Don't use {toolLabel} — interview only
+        </div>
+        <p className="text-xs" style={{ color: 'var(--muted-foreground)', lineHeight: 1.5 }}>
+          Skip this system. The facilitated interview will be the evidence source.
+        </p>
+      </button>
+    </div>
+  )
+}
+
 const STEP_TITLES = [
   'Team & scope',
   'Jira project',
@@ -456,25 +507,30 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
                 Choose a representative Jira project, or skip Jira if the interview should be the source for planning and flow evidence.
               </p>
             </div>
-            <div>
-              <Label>Jira project</Label>
-              <SelectField
-                value={jiraProjectKey}
-                onChange={value => {
-                  setJiraProjectKey(value)
-                  if (!value) {
-                    setJiraBoardId('')
-                    setJiraJql('')
-                  }
-                }}
-                options={[
-                  { value: '', label: "Don't use a Jira project — interview only" },
-                  ...jiraProjects.map(p => ({ value: p.key || p.id, label: `${p.key} — ${p.name}` })),
-                ]}
-              />
-            </div>
+            <SourceModeChoice
+              dark={dark}
+              toolLabel="Jira"
+              interviewOnly={jiraSkipped}
+              onChange={skip => {
+                if (skip) {
+                  setJiraProjectKey('')
+                  setJiraBoardId('')
+                  setJiraJql('')
+                } else if (!jiraProjectKey && jiraProjects[0]?.key) {
+                  setJiraProjectKey(jiraProjects[0].key)
+                }
+              }}
+            />
             {!jiraSkipped && (
               <>
+                <div>
+                  <Label>Jira project</Label>
+                  <SelectField
+                    value={jiraProjectKey}
+                    onChange={setJiraProjectKey}
+                    options={jiraProjects.map(p => ({ value: p.key || p.id, label: `${p.key} — ${p.name}` }))}
+                  />
+                </div>
                 <div>
                   <Label>Board (optional)</Label>
                   <SelectField
@@ -514,27 +570,32 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
                 Choose one representative repository, or skip Azure DevOps if the interview should be the source for delivery evidence.
               </p>
             </div>
-            <div>
-              <Label>Project</Label>
-              <SelectField
-                value={adoProjectId}
-                onChange={value => {
-                  setAdoProjectId(value)
-                  if (!value) {
-                    setAdoRepoId('')
-                    setAdoRepos([])
-                    setAdoPipelines([])
-                    setSelectedPipelineIds([])
-                  }
-                }}
-                options={[
-                  { value: '', label: "Don't use Azure DevOps — interview only" },
-                  ...adoProjects.map(p => ({ value: p.id, label: p.name })),
-                ]}
-              />
-            </div>
+            <SourceModeChoice
+              dark={dark}
+              toolLabel="Azure DevOps"
+              interviewOnly={adoSkipped}
+              onChange={skip => {
+                if (skip) {
+                  setAdoProjectId('')
+                  setAdoRepoId('')
+                  setAdoRepos([])
+                  setAdoPipelines([])
+                  setSelectedPipelineIds([])
+                } else if (!adoProjectId && adoProjects[0]?.id) {
+                  setAdoProjectId(adoProjects[0].id)
+                }
+              }}
+            />
             {!adoSkipped && (
               <>
+                <div>
+                  <Label>Project</Label>
+                  <SelectField
+                    value={adoProjectId}
+                    onChange={setAdoProjectId}
+                    options={adoProjects.map(p => ({ value: p.id, label: p.name }))}
+                  />
+                </div>
                 <div>
                   <Label>Repository</Label>
                   <SelectField

@@ -379,6 +379,28 @@ export function createRealtimeSession() {
   return apiFetch<RealtimeSessionCredentials>('/api/voice/realtime-session', { method: 'POST' })
 }
 
+/** Server-mediated WebRTC SDP exchange (application/sdp in/out). */
+export async function exchangeRealtimeCall(sdpOffer: string): Promise<string> {
+  const response = await fetch(`${API_BASE}/api/voice/realtime-call`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/sdp' },
+    body: sdpOffer,
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    let message = text.slice(0, 240) || `Realtime call failed (${response.status})`
+    try {
+      const payload = JSON.parse(text) as { error?: { message?: string } }
+      if (payload.error?.message) message = payload.error.message
+    } catch {
+      // plain SDP/error text
+    }
+    throw new ApiError(response.status, `http_${response.status}`, message)
+  }
+  return text
+}
+
 export function registerTempVoiceAudio(assessmentId?: string | null) {
   return apiFetch<{ id: string; path_label: string; retained: boolean; expires_at: string; cleaned_up: boolean }>(
     '/api/voice/audio/temp',

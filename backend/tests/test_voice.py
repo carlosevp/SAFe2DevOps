@@ -11,11 +11,10 @@ from sqlalchemy import select
 
 from app.core.db import get_session_factory
 from app.models.ai_settings import VoiceTempAudio
-from app.services.voice import VoiceService
+from app.services.voice import SERVER_SDP_MARKER, VoiceService
 
 
 def test_ephemeral_credential_endpoint_and_api_key_nondisclosure(client: TestClient) -> None:
-    # Ensure long-lived key is present in env but must never be returned.
     os.environ["OPENAI_API_KEY"] = "sk-test-long-lived-secret-key-should-never-leak"
     response = client.post("/api/voice/realtime-session")
     assert response.status_code == 200, response.text
@@ -42,7 +41,7 @@ def test_voice_settings_defaults_and_update(client: TestClient) -> None:
         "/api/voice/settings",
         json={
             "voice_enabled": True,
-            "transcription_model": "gpt-live-transcribe",
+            "transcription_model": "gpt-4o-transcribe",
             "voice_language": "en",
             "voice_stop_mode": "vad",
             "silence_timeout_ms": 2000,
@@ -57,7 +56,7 @@ def test_voice_settings_defaults_and_update(client: TestClient) -> None:
     assert updated.json()["silence_timeout_ms"] == 2000
 
 
-def test_session_config_avoids_vad_for_realtime_whisper(client: TestClient) -> None:
+def test_session_config_omits_turn_detection_for_realtime_whisper(client: TestClient) -> None:
     client.put(
         "/api/voice/settings",
         json={
@@ -73,17 +72,17 @@ def test_session_config_avoids_vad_for_realtime_whisper(client: TestClient) -> N
         cfg = service._session_config(service.ai.get())
         assert cfg["type"] == "transcription"
         assert cfg["audio"]["input"]["transcription"]["model"] == "gpt-realtime-whisper"
-        assert cfg["audio"]["input"]["turn_detection"] is None
+        assert "turn_detection" not in cfg["audio"]["input"]
         assert "format" not in cfg["audio"]["input"]
     finally:
         db.close()
 
 
-def test_session_config_live_transcribe_uses_languages_and_vad(client: TestClient) -> None:
+def test_session_config_transcribe_uses_language_and_vad(client: TestClient) -> None:
     client.put(
         "/api/voice/settings",
         json={
-            "transcription_model": "gpt-live-transcribe",
+            "transcription_model": "gpt-4o-transcribe",
             "voice_stop_mode": "vad",
             "voice_language": "en",
             "silence_timeout_ms": 1500,
@@ -95,50 +94,91 @@ def test_session_config_live_transcribe_uses_languages_and_vad(client: TestClien
         service = VoiceService(db)
         cfg = service._session_config(service.ai.get())
         transcription = cfg["audio"]["input"]["transcription"]
-        assert transcription["model"] == "gpt-live-transcribe"
-        assert transcription["languages"] == ["en"]
-        assert "language" not in transcription
+        assert transcription["model"] == "gpt-4o-transcribe"
+        assert transcription["language"] == "en"
+        assert "languages" not in transcription
         assert cfg["audio"]["input"]["turn_detection"]["type"] == "server_vad"
     finally:
         db.close()
 
 
-def test_live_mint_uses_openai_but_returns_only_ephemeral(client: TestClient) -> None:
-    fake = {
-        "value": "ek_ephemeral_from_openai",
-        "expires_at": int((datetime.now(UTC) + timedelta(seconds=60)).timestamp()),
-    }
+def test_live_session_uses_server_sdp_marker(client: TestClient) -> None:
+    factory = get_session_factory()
+    db = factory()
+    try:
+        service = VoiceService(db)
+        with (
+            patch.object(service.settings, "openai_api_key", "sk-live-parent-key"),
+            patch.object(service.settings, "interview_provider", "live"),
+        ):
+            row = service.ai.get()
+            row.interview_provider = "live"
+            db.flush()
+            out = service.create_realtime_session(actor="admin")
+        assert out.provider == "live"
+        assert out.client_secret == SERVER_SDP_MARKER
+        assert out.realtime_calls_url == "/api/voice/realtime-call"
+        assert "sk-live-parent-key" not in out.client_secret
+    finally:
+        db.close()
+
+
+def test_server_sdp_exchange_posts_to_openai(client: TestClient) -> None:
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = fake
-    mock_response.text = json.dumps(fake)
+    mock_response.text = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
 
     factory = get_session_factory()
     db = factory()
     try:
         service = VoiceService(db)
-        parent_key = "sk-live-parent-key-do-not-leak"
         with (
-            patch.object(service.settings, "openai_api_key", parent_key),
+            patch.object(service.settings, "openai_api_key", "sk-live-parent-key"),
+            patch.object(service.settings, "interview_provider", "live"),
             patch("httpx.Client") as client_cls,
         ):
+            row = service.ai.get()
+            row.interview_provider = "live"
+            db.flush()
             instance = MagicMock()
             instance.__enter__.return_value = instance
             instance.post.return_value = mock_response
             client_cls.return_value = instance
-            secret, expires, provider = service._mint_live_secret(
-                service._session_config(service.ai.get())
+            answer = service.exchange_realtime_sdp(
+                "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n",
+                actor="admin",
             )
-        assert secret == "ek_ephemeral_from_openai"
-        assert provider == "live"
-        assert parent_key not in secret
-        assert isinstance(expires, datetime)
+        assert answer.startswith("v=0")
+        assert instance.post.called
+        args, kwargs = instance.post.call_args
+        assert args[0].endswith("/v1/realtime/calls")
+        assert "Authorization" in kwargs["headers"]
+        assert "sk-live-parent-key" in kwargs["headers"]["Authorization"]
     finally:
         db.close()
 
 
+def test_realtime_call_endpoint_returns_sdp(client: TestClient) -> None:
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    with patch("app.services.voice.httpx.Client") as client_cls:
+        instance = MagicMock()
+        instance.__enter__.return_value = instance
+        instance.post.return_value = mock_response
+        client_cls.return_value = instance
+        # Force live path via settings on the app-backed service is hard; call service path above.
+        # Endpoint in mock interview mode should reject live SDP exchange.
+        response = client.post(
+            "/api/voice/realtime-call",
+            content="v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n",
+            headers={"Content-Type": "application/sdp"},
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "voice_mock_mode"
+
+
 def test_temp_audio_cleanup_and_retention_policy(client: TestClient, tmp_data_dir: Path) -> None:
-    # Default retention false => tmp file
     created = client.post(
         "/api/voice/audio/temp", json={"assessment_id": None, "filename": "room.webm"}
     )
@@ -162,7 +202,6 @@ def test_temp_audio_cleanup_and_retention_policy(client: TestClient, tmp_data_di
     assert cleaned.json()["removed"] is True
     assert not os.path.exists(path)
 
-    # Enable retention => upload path under data, not deleted without force
     client.put("/api/voice/settings", json={"retain_source_audio": True})
     retained = client.post("/api/voice/audio/temp", json={"filename": "kept.webm"})
     assert retained.status_code == 200

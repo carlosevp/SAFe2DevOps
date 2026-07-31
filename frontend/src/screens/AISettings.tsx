@@ -135,7 +135,7 @@ export default function AISettings({ dark, onNavigate }: Props) {
   const [vadEnabled, setVadEnabled] = useState(false)
   const [silenceSec, setSilenceSec] = useState(2)
   const [maxMinutes, setMaxMinutes] = useState(15)
-  const [transcriptionModel, setTranscriptionModel] = useState('gpt-live-transcribe')
+  const [transcriptionModel, setTranscriptionModel] = useState('gpt-4o-transcribe')
   const [language, setLanguage] = useState('auto')
   const [saved, setSaved] = useState(false)
   const [model, setModel] = useState('gpt-5.6-terra')
@@ -217,9 +217,9 @@ export default function AISettings({ dark, onNavigate }: Props) {
             <Toggle checked={voiceEnabled} onChange={setVoiceEnabled} />
           </SettingRow>
 
-          <SettingRow label="Transcription model" hint="Default is gpt-live-transcribe for OpenAI Realtime WebRTC. gpt-realtime-whisper requires manual stop (no VAD)." dark={dark}>
+          <SettingRow label="Transcription model" hint="Default is gpt-4o-transcribe. Voice uses a server-mediated WebRTC session so failures appear in Railway logs." dark={dark}>
             <SelectField
-              options={['gpt-live-transcribe', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'gpt-realtime-whisper', 'whisper-1']}
+              options={['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'gpt-live-transcribe', 'gpt-realtime-whisper', 'whisper-1']}
               value={transcriptionModel}
               onChange={setTranscriptionModel}
             />

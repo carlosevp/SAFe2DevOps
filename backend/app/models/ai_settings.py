@@ -23,7 +23,7 @@ class AiRuntimeSettings(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     reasoning_effort: Mapped[str] = mapped_column(String(40), nullable=False, default="medium")
     interview_provider: Mapped[str] = mapped_column(String(16), nullable=False, default="mock")
     transcription_model: Mapped[str] = mapped_column(
-        String(120), nullable=False, default="gpt-live-transcribe"
+        String(120), nullable=False, default="gpt-4o-transcribe"
     )
     voice_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     voice_language: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")

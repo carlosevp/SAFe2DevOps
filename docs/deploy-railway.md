@@ -62,11 +62,14 @@ APP_SECRET_KEY=<long random secret you will type at login>
 DATA_ENCRYPTION_KEY=<different long random secret>
 OPENAI_API_KEY=<your key>
 INTERVIEW_PROVIDER=live
+OPENAI_TRANSCRIPTION_MODEL=gpt-4o-transcribe
 PUBLIC_BASE_URL=https://<your-service>.up.railway.app
 ALLOW_MOCK_HOST_AUTH=false
 ```
 
 Do not set `VITE_API_BASE_URL` for the Railway image; the SPA calls `/api` on the same origin.
+
+Voice transcription uses a **server-mediated** WebRTC SDP exchange (`POST /api/voice/realtime-call`). OpenAI errors are logged as `voice realtime SDP exchange failed …` in Railway logs. In **AI & Voice settings**, set the transcription model to `gpt-4o-transcribe` if an older value is still stored in the database.
 
 ## Startup sequence
 
