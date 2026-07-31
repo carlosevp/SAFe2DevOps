@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Info } from 'lucide-react'
+import { getAiSettings, updateAiSettings } from '../lib/api'
 import type { Screen } from '../types'
 
 interface Props {
@@ -62,7 +63,17 @@ function SettingRow({
   )
 }
 
-function SelectField({ options, defaultValue }: { options: string[]; defaultValue?: string }) {
+function SelectField({
+  options,
+  value,
+  defaultValue,
+  onChange,
+}: {
+  options: string[]
+  value?: string
+  defaultValue?: string
+  onChange?: (v: string) => void
+}) {
   return (
     <select
       className="rounded-lg px-2.5 py-1.5 text-sm outline-none transition-base appearance-none"
@@ -72,11 +83,12 @@ function SelectField({ options, defaultValue }: { options: string[]; defaultValu
         color: 'var(--foreground)',
         minWidth: 140,
       }}
-      defaultValue={defaultValue}
+      {...(value !== undefined ? { value } : { defaultValue })}
+      onChange={e => onChange?.(e.target.value)}
       onFocus={e => (e.currentTarget.style.borderColor = 'var(--ring)')}
       onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
     >
-      {options.map(o => <option key={o}>{o}</option>)}
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
   )
 }
@@ -100,18 +112,46 @@ function NumberField({ defaultValue, min, max, suffix }: { defaultValue: number;
 }
 
 export default function AISettings({ dark, onNavigate }: Props) {
-  const [voiceEnabled, setVoiceEnabled] = useState(true)
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [retainAudio, setRetainAudio] = useState(false)
   const [retainTranscript, setRetainTranscript] = useState(true)
   const [remoteVoice, setRemoteVoice] = useState(false)
   const [adminRequired, setAdminRequired] = useState(true)
   const [vadEnabled, setVadEnabled] = useState(true)
   const [saved, setSaved] = useState(false)
+  const [model, setModel] = useState('gpt-5.6-terra')
+  const [effort, setEffort] = useState('medium')
+  const [provider, setProvider] = useState<'mock' | 'live'>('mock')
+  const [models, setModels] = useState<string[]>(['gpt-5.6-terra'])
+  const [efforts, setEfforts] = useState<string[]>(['low', 'medium', 'high'])
+  const [error, setError] = useState<string | null>(null)
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
 
-  function handleSave() {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2500)
+  useEffect(() => {
+    getAiSettings()
+      .then(data => {
+        setModel(data.assessment_model)
+        setEffort(data.reasoning_effort)
+        setProvider(data.interview_provider)
+        setModels(data.available_models)
+        setEfforts(data.available_reasoning_efforts)
+      })
+      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load AI settings'))
+  }, [])
+
+  async function handleSave() {
+    setError(null)
+    try {
+      await updateAiSettings({
+        assessment_model: model,
+        reasoning_effort: effort,
+        interview_provider: provider,
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save')
+    }
   }
 
   return (
@@ -191,12 +231,16 @@ export default function AISettings({ dark, onNavigate }: Props) {
         >
           <h2 className="font-semibold text-sm py-4" style={{ color: 'var(--foreground)' }}>Assessment AI</h2>
 
-          <SettingRow label="Assessment model" hint="The AI model used for coverage analysis and score generation." dark={dark}>
-            <SelectField options={['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5']} defaultValue="claude-sonnet-5" />
+          <SettingRow label="Interview provider" hint="Use mock for local/demo. Live uses the OpenAI Responses API." dark={dark}>
+            <SelectField options={['mock', 'live']} value={provider} onChange={v => setProvider(v as 'mock' | 'live')} />
+          </SettingRow>
+
+          <SettingRow label="Assessment model" hint="Configurable default is gpt-5.6-terra. Used for coverage analysis via Responses API." dark={dark}>
+            <SelectField options={models} value={model} onChange={setModel} />
           </SettingRow>
 
           <SettingRow label="Reasoning effort" hint="Higher reasoning produces more accurate coverage mapping at the cost of latency." dark={dark}>
-            <SelectField options={['High', 'Medium', 'Low']} defaultValue="High" />
+            <SelectField options={efforts} value={effort} onChange={setEffort} />
           </SettingRow>
 
           <SettingRow label="Evidence influence default" hint="Controls how tool evidence influences scores. Can be changed per assessment." dark={dark}>
@@ -234,6 +278,8 @@ export default function AISettings({ dark, onNavigate }: Props) {
           </p>
         </div>
 
+        {error && <div className="mb-4 text-sm" style={{ color: '#dc2626' }}>{error}</div>}
+
         <div className="flex items-center justify-end gap-3">
           <button
             onClick={() => onNavigate('welcome')}
@@ -243,7 +289,7 @@ export default function AISettings({ dark, onNavigate }: Props) {
             Cancel
           </button>
           <button
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-base"
             style={{ background: saved ? '#10b981' : 'var(--primary)', color: '#fff' }}
             onMouseEnter={e => { if (!saved) e.currentTarget.style.opacity = '0.88' }}

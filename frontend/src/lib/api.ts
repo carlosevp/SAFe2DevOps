@@ -203,3 +203,137 @@ export function confirmEvidence(assessmentId: string, snapshotId: string) {
     method: 'POST',
   })
 }
+
+export type CoverageStateApi = 'not_discussed' | 'partial' | 'sufficient' | 'clarify'
+
+export type InterviewPractice = {
+  practice_key: string
+  practice_name: string
+  domain_key: string
+  domain_short_name: string
+  coverage_state: CoverageStateApi
+  open_gaps: string[]
+}
+
+export type InterviewSession = {
+  assessment_id: string
+  team_name: string
+  product_service_name: string
+  status: string
+  interview_status: string
+  current_question: string
+  why_asking: string
+  evidence_context: string
+  topic_label: string
+  pending_clarification: string | null
+  draft_answer_text: string
+  last_outcome: 'none' | 'clarify' | 'sufficient'
+  overall_coverage_summary: string
+  coverage_confirmation: string | null
+  turn_count: number
+  answered_turn_count: number
+  completion_eligible: boolean
+  completion_blockers: string[]
+  practices: InterviewPractice[]
+  telemetry: {
+    provider: string
+    model: string
+    reasoning_effort: string
+    latency_ms?: number | null
+    input_tokens?: number | null
+    output_tokens?: number | null
+    prompt_config_version: string
+  } | null
+}
+
+export type TurnSubmitResult = {
+  session: InterviewSession
+  analysis_summary: string
+  claims: string[]
+  covered_practices: string[]
+  partial_practices: string[]
+  clarify_practices: string[]
+  duplicated: boolean
+}
+
+export type CheckpointData = {
+  assessment_id: string
+  headline: string
+  summary: string
+  sufficient_count: number
+  partial_count: number
+  not_discussed_count: number
+  clarify_count: number
+  covered: { label: string; domain: string }[]
+  remaining: { label: string; domain: string; priority: string }[]
+  completion_eligible: boolean
+  completion_blockers: string[]
+  impact_note: string
+}
+
+export type AiSettings = {
+  assessment_model: string
+  reasoning_effort: string
+  interview_provider: 'mock' | 'live'
+  transcription_model: string
+  prompt_config_version: string
+  available_models: string[]
+  available_reasoning_efforts: string[]
+  updated_at: string | null
+}
+
+export function startInterview(assessmentId: string) {
+  return apiFetch<{ session: InterviewSession }>(`/api/assessments/${assessmentId}/interview/start`, { method: 'POST' })
+}
+
+export function getInterview(assessmentId: string) {
+  return apiFetch<InterviewSession>(`/api/assessments/${assessmentId}/interview`)
+}
+
+export function resumeInterview(assessmentId: string) {
+  return apiFetch<InterviewSession>(`/api/assessments/${assessmentId}/interview/resume`, { method: 'POST' })
+}
+
+export function saveInterview(assessmentId: string, draft_answer_text = '') {
+  return apiFetch<InterviewSession>(`/api/assessments/${assessmentId}/interview/save`, {
+    method: 'POST',
+    body: JSON.stringify({ draft_answer_text }),
+  })
+}
+
+export function saveInterviewDraft(assessmentId: string, draft_answer_text: string) {
+  return apiFetch<InterviewSession>(`/api/assessments/${assessmentId}/interview/draft`, {
+    method: 'PUT',
+    body: JSON.stringify({ draft_answer_text }),
+  })
+}
+
+export function submitInterviewTurn(
+  assessmentId: string,
+  body: { answer_text: string; idempotency_key: string; is_clarification?: boolean },
+) {
+  return apiFetch<TurnSubmitResult>(`/api/assessments/${assessmentId}/interview/turns`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function getInterviewCheckpoint(assessmentId: string) {
+  return apiFetch<CheckpointData>(`/api/assessments/${assessmentId}/interview/checkpoint`)
+}
+
+export function completeInterview(assessmentId: string) {
+  return apiFetch<InterviewSession>(`/api/assessments/${assessmentId}/interview/complete`, { method: 'POST' })
+}
+
+export function getAiSettings() {
+  return apiFetch<AiSettings>('/api/ai-settings')
+}
+
+export function updateAiSettings(body: {
+  assessment_model?: string
+  reasoning_effort?: string
+  interview_provider?: 'mock' | 'live'
+}) {
+  return apiFetch<AiSettings>('/api/ai-settings', { method: 'PUT', body: JSON.stringify(body) })
+}

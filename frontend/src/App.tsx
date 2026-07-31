@@ -80,9 +80,9 @@ export default function App() {
       )}
       {(screen === 'workshop' || screen === 'checkpoint') && (
         <div style={{ position: 'relative' }}>
-          <WorkshopRoom dark={dark} onNavigate={setScreen} />
+          <WorkshopRoom dark={dark} onNavigate={setScreen} assessmentId={assessmentId} />
           {showCheckpoint && (
-            <Checkpoint dark={dark} onNavigate={setScreen} />
+            <Checkpoint dark={dark} onNavigate={setScreen} assessmentId={assessmentId} />
           )}
         </div>
       )}

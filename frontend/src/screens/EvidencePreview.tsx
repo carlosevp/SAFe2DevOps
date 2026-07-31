@@ -5,6 +5,7 @@ import {
   collectEvidence,
   confirmEvidence,
   getLatestEvidence,
+  startInterview,
   type EvidenceMetric,
   type EvidenceSnapshot,
 } from '../lib/api'
@@ -77,6 +78,7 @@ export default function EvidencePreview({ dark, onNavigate, assessmentId, assess
     setError(null)
     try {
       await confirmEvidence(assessmentId, snapshot.id)
+      await startInterview(assessmentId)
       onNavigate('workshop')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Confirm failed')
