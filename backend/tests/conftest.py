@@ -26,10 +26,14 @@ def admin_password() -> str:
 
 
 @pytest.fixture()
-def app_env(tmp_data_dir: Path, admin_password: str, tmp_path: Path) -> Generator[dict[str, str], None, None]:
+def app_env(
+    tmp_data_dir: Path, admin_password: str, tmp_path: Path
+) -> Generator[dict[str, str], None, None]:
     dist = tmp_path / "frontend-dist"
     dist.mkdir()
-    (dist / "index.html").write_text("<!doctype html><html><body>SPA</body></html>", encoding="utf-8")
+    (dist / "index.html").write_text(
+        "<!doctype html><html><body>SPA</body></html>", encoding="utf-8"
+    )
     (dist / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -43,9 +47,12 @@ def app_env(tmp_data_dir: Path, admin_password: str, tmp_path: Path) -> Generato
         "FRONTEND_DIST": str(dist),
         "CORS_ORIGINS": "http://testserver",
         "LOG_LEVEL": "WARNING",
-        "ASSESSMENT_CONFIG_PATH": str(repo_root / "config" / "assessment" / "assessment_model.yaml"),
+        "ASSESSMENT_CONFIG_PATH": str(
+            repo_root / "config" / "assessment" / "assessment_model.yaml"
+        ),
         "INTEGRATION_PROVIDER": "mock",
         "INTERVIEW_PROVIDER": "mock",
+        "ALLOW_MOCK_HOST_AUTH": "true",
     }
     previous = {key: os.environ.get(key) for key in env}
     os.environ.update(env)

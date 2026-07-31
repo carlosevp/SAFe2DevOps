@@ -1,18 +1,19 @@
 # SAFe2DevOps
 
-Adaptive SAFe DevOps maturity assessment. The Figma Make React frontend is the UX source of truth; this repository adds a FastAPI foundation that serves the API and SPA from one origin.
+Adaptive SAFe DevOps maturity assessment. The Figma Make React frontend is the UX source of truth; FastAPI serves the API and SPA from one origin.
 
 ## Repository layout
 
 ```text
 frontend/               Figma-generated React + Vite + Tailwind app
 backend/                FastAPI + SQLAlchemy + Alembic + pytest
-config/                 Shared non-secret defaults
+config/                 Shared non-secret assessment YAML
 deploy/openshift/       OpenShift manifests (single replica + PVC)
-docs/                   Product and architecture docs
-scripts/                Local and container helpers
+docs/                   Product, security, and operations docs
+e2e/                    Playwright smoke + required workflow
+scripts/                Local helpers (seed, reset, combined run, ops)
 Dockerfile              Multi-stage combined production image
-railway.toml            Railway test deploy skeleton
+railway.toml            Railway deploy settings
 ```
 
 ## Stack
@@ -22,83 +23,54 @@ railway.toml            Railway test deploy skeleton
 | Frontend | React 19, Vite 8, TypeScript, Tailwind CSS v4 |
 | Backend | Python 3.12, FastAPI, Pydantic, SQLAlchemy, Alembic |
 | Storage | SQLite under `DATA_DIR` (local `./data`, deployed `/data`) |
-| AI (later) | Official OpenAI Python SDK |
+| AI | OpenAI SDK (mock providers by default) |
 | Test deploy | Railway |
 | Final deploy | OpenShift |
 | Scale | Exactly one app replica and one Uvicorn worker while SQLite is used |
 
-## Prerequisites
-
-- Node.js 22 + pnpm 10.34.3
-- Python 3.12
-- Docker (for image builds)
-
-## Local startup
-
-### 1. Environment
+## Quick start (demo)
 
 ```bash
-cp .env.example .env
-python3.12 scripts/hash_admin_password.py --password 'change-me'
-# paste the hash into ADMIN_PASSWORD_HASH in .env
+chmod +x scripts/reset_and_seed_demo.sh scripts/run_combined.sh
+./scripts/reset_and_seed_demo.sh
+./scripts/run_combined.sh
 ```
 
-### 2. Backend
+- Application: http://127.0.0.1:8000/
+- Readiness: http://127.0.0.1:8000/api/health/ready
+- Demo admin password (local only): `cat data/.demo-admin-password`
+
+Demo mode uses mock Jira/ADO/interview providers — no live credentials required.
+
+## Local development
+
+See [docs/local-development.md](docs/local-development.md).
 
 ```bash
-cd backend
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export DATA_DIR=../data
-alembic upgrade head
-uvicorn app.main:app --reload --port 8000
-```
+# Split mode
+./scripts/dev_backend.sh
+./scripts/dev_frontend.sh
 
-Or: `./scripts/dev_backend.sh`
-
-API docs (non-production): http://127.0.0.1:8000/api/docs  
-Liveness: http://127.0.0.1:8000/api/health/live  
-Readiness: http://127.0.0.1:8000/api/health/ready
-
-### 3. Frontend
-
-```bash
-cd frontend
-pnpm install
-pnpm run dev
-```
-
-Or: `./scripts/dev_frontend.sh`
-
-Vite proxies `/api` to `http://127.0.0.1:8000`. The thin client is `frontend/src/lib/api.ts` (credentials included for the admin session cookie).
-
-### 4. Combined production-style run
-
-```bash
-cd frontend && pnpm install && pnpm run build && cd ..
-cd backend && source .venv/bin/activate
-export DATA_DIR=../data FRONTEND_DIST=../frontend/dist APP_ENV=production
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+# Reset + reseed demo
+./scripts/reset_and_seed_demo.sh
 ```
 
 ## Validation commands
 
 ```bash
 # Frontend
-cd frontend && pnpm install && pnpm run typecheck && pnpm run build
+cd frontend && pnpm install && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build
 
 # Backend
-cd backend && .venv/bin/pytest
-cd backend && DATA_DIR=../data .venv/bin/alembic upgrade head
+cd backend && source .venv/bin/activate
+ruff check app tests && ruff format --check app tests
+mypy app
+pytest --cov=app --cov-report=term-missing
 
-# Container
-docker build -t safedevops:local .
-```
+# Playwright (combined app must be running)
+cd e2e && pnpm install && npx playwright install chromium && pnpm test
 
-Optional non-root container check:
-
-```bash
+# Container (optional)
 RUN_DOCKER_TESTS=1 pytest backend/tests/test_container_user.py
 ```
 
@@ -114,53 +86,31 @@ DATA_DIR/
   working/
 ```
 
-APIs return logical storage labels only — never absolute filesystem paths.
+## SQLite limitations
 
-## Auth foundation
-
-- One server-configured admin password (`ADMIN_PASSWORD_HASH`)
-- Signed HttpOnly session cookie (`sd_admin_session`)
-- Assessment-access token helpers with expiry + revocation ledger (`access_token_revocations`)
-- No enterprise SSO in this phase
-
-## Deployment notes
-
-- Railway: see [docs/deploy-railway.md](docs/deploy-railway.md) — `railway.toml`, volume at `/data`, `DATA_DIR=/data`, `numReplicas = 1`
-- OpenShift: see [docs/deploy-openshift.md](docs/deploy-openshift.md) — `deploy/openshift/*`, `replicas: 1`, `strategy: Recreate`, PVC at `/data`
-- Prefer `ReadWriteOncePod` when the cluster supports it; manifests default to `ReadWriteOnce`
-- SQLite default journal mode is `DELETE` (portable); enable WAL only on validated storage
-- Container runs non-root / arbitrary-UID friendly and writes only to `/data` and `/tmp`
-- Backups: [docs/backup-restore.md](docs/backup-restore.md) (`scripts/ops_admin.py`)
-- CI: `.github/workflows/ci.yml` (no automatic OpenShift deploy)
-
-## Assessment model
-
-Configuration-driven SAFe model (4 domains / 16 practices):
-
-`config/assessment/assessment_model.yaml`
-
-Validated at startup. Admins can reorder domains/practices via `order` fields without code changes. See [docs/assessment-model.md](docs/assessment-model.md).
-
-Demo seed:
-
-```bash
-python scripts/seed_demo.py
-```
+- One replica, one Uvicorn worker, one writer
+- No horizontal autoscaling
+- Default journal `DELETE` (portable); WAL only on validated storage
+- See [ADR-002](docs/decisions/ADR-002-sqlite-persistent-storage.md)
 
 ## Documentation
 
-- [Product scope](docs/product-scope.md)
-- [Assessment model](docs/assessment-model.md)
-- [Figma screen map](docs/figma-screen-map.md)
-- [Target architecture](docs/target-architecture.md)
-- [Implementation plan](docs/implementation-plan.md)
-- [ADR-001 Fresh build](docs/decisions/ADR-001-fresh-build.md)
-- [ADR-002 SQLite persistent storage](docs/decisions/ADR-002-sqlite-persistent-storage.md)
-- [Railway deployment](docs/deploy-railway.md)
-- [OpenShift deployment](docs/deploy-openshift.md)
-- [Backup and restore](docs/backup-restore.md)
-- [CI/CD](docs/ci-cd.md)
+| Topic | Doc |
+| --- | --- |
+| Local development | [docs/local-development.md](docs/local-development.md) |
+| Architecture | [docs/target-architecture.md](docs/target-architecture.md) |
+| OpenAI configuration | [docs/openai-configuration.md](docs/openai-configuration.md) |
+| Jira / ADO permissions | [docs/integrations-permissions.md](docs/integrations-permissions.md) |
+| Railway | [docs/deploy-railway.md](docs/deploy-railway.md) |
+| OpenShift | [docs/deploy-openshift.md](docs/deploy-openshift.md) |
+| Backups | [docs/backup-restore.md](docs/backup-restore.md) |
+| Admin review / influence modes | [docs/admin-review.md](docs/admin-review.md) |
+| Figma fidelity | [docs/figma-implementation-review.md](docs/figma-implementation-review.md) |
+| Security review | [docs/security-review.md](docs/security-review.md) |
+| Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Known limitations | [docs/known-limitations.md](docs/known-limitations.md) |
+| CI/CD | [docs/ci-cd.md](docs/ci-cd.md) |
 
 ## Safety
 
-Never commit `.env`, tokens, PATs, SQLite files, uploads, exports, `node_modules`, or build output. See [SECURITY.md](SECURITY.md).
+Never commit `.env`, `data/.demo-admin-password`, tokens, PATs, SQLite files, uploads, or exports. See [SECURITY.md](SECURITY.md).

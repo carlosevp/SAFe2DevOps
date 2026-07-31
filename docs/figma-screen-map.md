@@ -32,20 +32,19 @@ Defined in `src/index.css`:
 - Tailwind v4 `@theme inline` palette: navy / teal / amber / slate scales
 - Fonts: Instrument Serif (display), Inter (UI), JetBrains Mono (mono)
 
-## Mocked / incomplete handlers (expected in Phase 1)
+## Current wiring vs Figma mocks
 
-| Area | Behavior today |
+Most screens call `frontend/src/lib/api.ts`. See [figma-implementation-review.md](figma-implementation-review.md) for fidelity and intentional deviations.
+
+Still partial / illustrative:
+
+| Area | Behavior |
 | --- | --- |
-| Sample practices & metrics | `src/data/sampleData.ts` |
-| Integrations test/refresh | `setTimeout` status simulation |
-| Workshop recording | Types a `MOCK_TRANSCRIPT` character-by-character |
-| Adaptive questioning | Hardcoded `WORKSHOP_QUESTIONS` sequence |
-| Remote contributions | Static `REMOTE_CONTRIBUTIONS` list |
-| Admin publish | Delayed navigate to `results` |
-| AI settings save | Local “saved” toast only |
-| Setup copy-link | UI copy acknowledgement only |
-
-No real `fetch` calls to backend or vendor APIs exist yet.
+| Setup invite copy link | UI acknowledgement; real invites are created in the workshop |
+| Welcome resume shortcuts | May open screens without a persisted assessment id |
+| Admin Evidence / Transcript nav | Thin placeholders |
+| Some AI settings toggles | Local UI-only |
+| `src/data/sampleData.ts` | Largely orphaned by live APIs |
 
 ## Practice model (16)
 

@@ -39,11 +39,17 @@ class EvidenceService:
         self.settings = get_settings()
         self.storage = StorageService(self.settings)
 
-    def collect_snapshot(self, assessment_id: str, *, actor: str = "admin", refresh: bool = False) -> EvidenceSnapshot:
+    def collect_snapshot(
+        self, assessment_id: str, *, actor: str = "admin", refresh: bool = False
+    ) -> EvidenceSnapshot:
         assessment = self._require_assessment(assessment_id)
         selection = assessment.source_selection
         if selection is None:
-            raise AppError(code="source_selection_required", message="Source selection is required", status_code=400)
+            raise AppError(
+                code="source_selection_required",
+                message="Source selection is required",
+                status_code=400,
+            )
 
         existing = self.get_latest_snapshot(assessment_id)
         if existing and existing.immutable and not refresh:
@@ -55,9 +61,18 @@ class EvidenceService:
 
         providers = get_integration_providers(self.db, self.settings)
         lookback = assessment.lookback_days
-        pipeline_names = [p.get("name") for p in json.loads(selection.selected_pipelines_json or "[]") if p.get("name")]
+        pipeline_names = [
+            p.get("name")
+            for p in json.loads(selection.selected_pipelines_json or "[]")
+            if p.get("name")
+        ]
         if not pipeline_names:
-            pipeline_names = [p.name for p in providers.ado.list_pipelines(selection.ado_project_id, selection.ado_repository_name)]
+            pipeline_names = [
+                p.name
+                for p in providers.ado.list_pipelines(
+                    selection.ado_project_id, selection.ado_repository_name
+                )
+            ]
 
         jira_ok = True
         ado_ok = True
@@ -101,7 +116,9 @@ class EvidenceService:
             commits, prs, runs = [], [], []
 
         jira_norm = normalize_jira_issues(issues, lookback_days=lookback, connection_ok=jira_ok)
-        ado_norm = normalize_ado_evidence(commits=commits, pull_requests=prs, runs=runs, connection_ok=ado_ok)
+        ado_norm = normalize_ado_evidence(
+            commits=commits, pull_requests=prs, runs=runs, connection_ok=ado_ok
+        )
 
         payload = {
             "assessment_id": assessment_id,
@@ -117,7 +134,12 @@ class EvidenceService:
                 },
                 # Store sanitized summaries only — not credentials, not full changelog dumps.
                 "issue_summaries": [
-                    {"key": i.key, "type": i.issue_type, "status": i.status, "summary": i.summary[:240]}
+                    {
+                        "key": i.key,
+                        "type": i.issue_type,
+                        "status": i.status,
+                        "summary": i.summary[:240],
+                    }
                     for i in issues[:500]
                 ],
             },
@@ -135,8 +157,12 @@ class EvidenceService:
         }
         # Ensure no secret-like keys persist.
         serialized = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        if b"api_token" in serialized.lower() or b"\"pat\"" in serialized.lower():
-            raise AppError(code="evidence_payload_unsafe", message="Refusing to persist unsafe evidence payload", status_code=500)
+        if b"api_token" in serialized.lower() or b'"pat"' in serialized.lower():
+            raise AppError(
+                code="evidence_payload_unsafe",
+                message="Refusing to persist unsafe evidence payload",
+                status_code=500,
+            )
 
         checksum = hashlib.sha256(serialized).hexdigest()
         rel_path = f"evidence/{assessment_id}/{checksum[:16]}.json.gz"
@@ -193,10 +219,16 @@ class EvidenceService:
 
         status = AssessmentStatus(assessment.status)
         if status == AssessmentStatus.SETUP:
-            self.lifecycle.transition(assessment, AssessmentStatus.COLLECTING_EVIDENCE, actor_subject=actor)
-            self.lifecycle.transition(assessment, AssessmentStatus.EVIDENCE_READY, actor_subject=actor)
+            self.lifecycle.transition(
+                assessment, AssessmentStatus.COLLECTING_EVIDENCE, actor_subject=actor
+            )
+            self.lifecycle.transition(
+                assessment, AssessmentStatus.EVIDENCE_READY, actor_subject=actor
+            )
         elif status == AssessmentStatus.COLLECTING_EVIDENCE:
-            self.lifecycle.transition(assessment, AssessmentStatus.EVIDENCE_READY, actor_subject=actor)
+            self.lifecycle.transition(
+                assessment, AssessmentStatus.EVIDENCE_READY, actor_subject=actor
+            )
 
         self.audit.record(
             assessment_id=assessment_id,
@@ -218,7 +250,11 @@ class EvidenceService:
     ) -> EvidenceSnapshot:
         snapshot = self.get_snapshot(snapshot_id)
         if snapshot.immutable:
-            raise AppError(code="snapshot_immutable", message="Cannot modify an immutable evidence snapshot", status_code=409)
+            raise AppError(
+                code="snapshot_immutable",
+                message="Cannot modify an immutable evidence snapshot",
+                status_code=409,
+            )
 
         # Replace exclusion rows
         for row in list(snapshot.exclusions):
@@ -251,16 +287,23 @@ class EvidenceService:
             repository_id=selection.ado_repository_id,
             lookback_days=snapshot.lookback_days,
         )
-        pipeline_names = [p.get("name") for p in json.loads(selection.selected_pipelines_json or "[]") if p.get("name")]
+        pipeline_names = [
+            p.get("name")
+            for p in json.loads(selection.selected_pipelines_json or "[]")
+            if p.get("name")
+        ]
         runs = providers.ado.list_pipeline_runs(
             project_id=selection.ado_project_id,
-            pipeline_names=pipeline_names or [p.name for p in providers.ado.list_pipelines(selection.ado_project_id)],
+            pipeline_names=pipeline_names
+            or [p.name for p in providers.ado.list_pipelines(selection.ado_project_id)],
             lookback_days=snapshot.lookback_days,
         )
         commits, prs, runs = apply_exclusions(
             commits=commits, pull_requests=prs, runs=runs, exclusions=set(exclusions)
         )
-        ado_norm = normalize_ado_evidence(commits=commits, pull_requests=prs, runs=runs, connection_ok=True)
+        ado_norm = normalize_ado_evidence(
+            commits=commits, pull_requests=prs, runs=runs, connection_ok=True
+        )
 
         # Replace azdo metrics only.
         for metric in list(snapshot.metrics):
@@ -313,7 +356,10 @@ class EvidenceService:
     def get_latest_snapshot(self, assessment_id: str) -> EvidenceSnapshot | None:
         return self.db.scalar(
             select(EvidenceSnapshot)
-            .where(EvidenceSnapshot.assessment_id == assessment_id, EvidenceSnapshot.superseded_by_id.is_(None))
+            .where(
+                EvidenceSnapshot.assessment_id == assessment_id,
+                EvidenceSnapshot.superseded_by_id.is_(None),
+            )
             .options(
                 selectinload(EvidenceSnapshot.metrics),
                 selectinload(EvidenceSnapshot.limitations),
@@ -333,13 +379,19 @@ class EvidenceService:
             )
         )
         if snapshot is None:
-            raise AppError(code="snapshot_not_found", message="Evidence snapshot not found", status_code=404)
+            raise AppError(
+                code="snapshot_not_found", message="Evidence snapshot not found", status_code=404
+            )
         return snapshot
 
     def _load_payload(self, snapshot: EvidenceSnapshot) -> dict[str, Any]:
         if not snapshot.raw_payload_ref or not snapshot.payload_checksum:
             return {}
-        path = self._evidence_root() / snapshot.assessment_id / f"{snapshot.payload_checksum[:16]}.json.gz"
+        path = (
+            self._evidence_root()
+            / snapshot.assessment_id
+            / f"{snapshot.payload_checksum[:16]}.json.gz"
+        )
         if not path.exists():
             return {}
         with gzip.open(path, "rb") as handle:
@@ -354,7 +406,9 @@ class EvidenceService:
     def _require_assessment(self, assessment_id: str) -> Assessment:
         assessment = self.assessments.get(assessment_id)
         if assessment is None:
-            raise AppError(code="assessment_not_found", message="Assessment not found", status_code=404)
+            raise AppError(
+                code="assessment_not_found", message="Assessment not found", status_code=404
+            )
         return assessment
 
     @staticmethod

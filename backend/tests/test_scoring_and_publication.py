@@ -46,7 +46,12 @@ def _prepare_for_review(client: TestClient) -> str:
     )
     collected = client.post(f"/api/assessments/{assessment_id}/evidence/collect")
     assert collected.status_code == 200
-    assert client.post(f"/api/assessments/{assessment_id}/evidence/{collected.json()['id']}/confirm").status_code == 200
+    assert (
+        client.post(
+            f"/api/assessments/{assessment_id}/evidence/{collected.json()['id']}/confirm"
+        ).status_code
+        == 200
+    )
     assert client.post(f"/api/assessments/{assessment_id}/interview/start").status_code == 200
     turn = client.post(
         f"/api/assessments/{assessment_id}/interview/turns",
@@ -74,7 +79,9 @@ def _prepare_for_review(client: TestClient) -> str:
             for coverage in assessment.practice_coverages:
                 coverage.coverage_state = CoverageState.SUFFICIENT.value
                 coverage.confidence = 0.8
-            LifecycleService(db).transition(assessment, AssessmentStatus.INTERVIEW_COMPLETE, actor_subject="admin")
+            LifecycleService(db).transition(
+                assessment, AssessmentStatus.INTERVIEW_COMPLETE, actor_subject="admin"
+            )
             db.commit()
         finally:
             db.close()
@@ -84,7 +91,9 @@ def _prepare_for_review(client: TestClient) -> str:
 def test_score_schema_and_range() -> None:
     result, telemetry = MockScoringProvider().score_assessment(
         {
-            "coverage_states": {k: "partial" for k in get_assessment_model_config().practice_keys()},
+            "coverage_states": {
+                k: "partial" for k in get_assessment_model_config().practice_keys()
+            },
             "influence_mode": "balanced",
             "evidence_limitations": [],
         }
@@ -115,13 +124,18 @@ def test_domain_rollups_and_evidence_modes(client: TestClient) -> None:
     for mode in ("context_only", "balanced", "evidence_led"):
         result, _ = MockScoringProvider().score_assessment(
             {
-                "coverage_states": {k: "sufficient" for k in get_assessment_model_config().practice_keys()},
+                "coverage_states": {
+                    k: "sufficient" for k in get_assessment_model_config().practice_keys()
+                },
                 "influence_mode": mode,
                 "integration_failures": ["Jira temporarily unavailable"],
                 "evidence_limitations": [],
             }
         )
-        assert any("Integration limitation" in lim or "unavailable" in lim.lower() for lim in result.evidence_limitations)
+        assert any(
+            "Integration limitation" in lim or "unavailable" in lim.lower()
+            for lim in result.evidence_limitations
+        )
         # Failures must not force all scores to floor.
         assert result.overall_maturity >= 2.0
 

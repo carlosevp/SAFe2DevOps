@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from app.integrations.http import request_json, sanitize_remote_text, validate_https_url, with_client
+from app.integrations.http import (
+    request_json,
+    sanitize_remote_text,
+    validate_https_url,
+    with_client,
+)
 from app.integrations.jira.types import JiraBoard, JiraIssue, JiraProject
 
 
@@ -60,7 +65,9 @@ class LiveJiraProvider:
 
     def list_projects(self) -> list[JiraProject]:
         def _call(client):
-            data = request_json(client, "GET", "/rest/api/3/project/search", params={"maxResults": 100})
+            data = request_json(
+                client, "GET", "/rest/api/3/project/search", params={"maxResults": 100}
+            )
             values = (data or {}).get("values") or []
             return [
                 JiraProject(
@@ -116,7 +123,11 @@ class LiveJiraProvider:
         jql: str | None = None,
         page_size: int = 50,
     ):
-        base_jql = jql.strip() if jql else f'project = "{project_key}" AND created >= -{int(lookback_days)}d'
+        base_jql = (
+            jql.strip()
+            if jql
+            else f'project = "{project_key}" AND created >= -{int(lookback_days)}d'
+        )
         start_at = 0
 
         def _page(client, start: int):
@@ -144,8 +155,12 @@ class LiveJiraProvider:
                 page.append(
                     JiraIssue(
                         key=sanitize_remote_text(item.get("key")),
-                        issue_type=sanitize_remote_text((fields.get("issuetype") or {}).get("name", "Unknown")),
-                        status=sanitize_remote_text((fields.get("status") or {}).get("name", "Unknown")),
+                        issue_type=sanitize_remote_text(
+                            (fields.get("issuetype") or {}).get("name", "Unknown")
+                        ),
+                        status=sanitize_remote_text(
+                            (fields.get("status") or {}).get("name", "Unknown")
+                        ),
                         created=created or datetime.now(UTC),
                         resolved=resolved,
                         summary=sanitize_remote_text(fields.get("summary")),

@@ -109,7 +109,9 @@ class RemoteParticipationService:
             )
         ):
             prior.revoked_at = datetime.now(UTC)
-            self.tokens.revoke(self.db, jti=prior.jti, assessment_id=assessment_id, reason="replaced")
+            self.tokens.revoke(
+                self.db, jti=prior.jti, assessment_id=assessment_id, reason="replaced"
+            )
 
         ttl = ttl_seconds or self.settings.remote_invite_ttl_seconds
         token, jti, expires_at = issue_assessment_access_token(
@@ -140,7 +142,9 @@ class RemoteParticipationService:
 
     def revoke_invite(self, assessment_id: str, jti: str, *, actor: str) -> RemoteInviteOut:
         invite = self.db.scalar(
-            select(RemoteInvite).where(RemoteInvite.assessment_id == assessment_id, RemoteInvite.jti == jti)
+            select(RemoteInvite).where(
+                RemoteInvite.assessment_id == assessment_id, RemoteInvite.jti == jti
+            )
         )
         if invite is None:
             raise AppError(code="invite_not_found", message="Invite not found", status_code=404)
@@ -169,7 +173,11 @@ class RemoteParticipationService:
         payload = self._verify_remote_token(token)
         assessment = self._require_assessment(payload["assessment_id"])
         if not assessment.remote_participation_enabled:
-            raise AppError(code="remote_participation_disabled", message="Remote participation is disabled", status_code=403)
+            raise AppError(
+                code="remote_participation_disabled",
+                message="Remote participation is disabled",
+                status_code=403,
+            )
         topic = self._topic_for_assessment(assessment)
         return RemoteTopicOut(
             team_name=assessment.team_name,
@@ -181,18 +189,28 @@ class RemoteParticipationService:
             invite_valid=True,
         )
 
-    def join(self, *, token: str, display_name: str, email: str, client_key: str) -> RemoteContributorJoinOut:
+    def join(
+        self, *, token: str, display_name: str, email: str, client_key: str
+    ) -> RemoteContributorJoinOut:
         rate_limiter.check(f"remote-join:{client_key}", limit=10, window_seconds=60)
         payload = self._verify_remote_token(token)
         assessment_id = payload["assessment_id"]
         assessment = self._require_assessment(assessment_id)
         if not assessment.remote_participation_enabled:
-            raise AppError(code="remote_participation_disabled", message="Remote participation is disabled", status_code=403)
+            raise AppError(
+                code="remote_participation_disabled",
+                message="Remote participation is disabled",
+                status_code=403,
+            )
 
         name = sanitize_remote_text(display_name, max_len=200).strip()
         clean_email = sanitize_remote_text(email, max_len=320).strip().lower()
         if not name or "@" not in clean_email:
-            raise AppError(code="invalid_contributor", message="Name and valid email are required", status_code=400)
+            raise AppError(
+                code="invalid_contributor",
+                message="Name and valid email are required",
+                status_code=400,
+            )
 
         existing = self.db.scalar(
             select(RemoteContributor).where(
@@ -248,15 +266,25 @@ class RemoteParticipationService:
         assessment_id = payload["assessment_id"]
         assessment = self._require_assessment(assessment_id)
         if not assessment.remote_participation_enabled:
-            raise AppError(code="remote_participation_disabled", message="Remote participation is disabled", status_code=403)
+            raise AppError(
+                code="remote_participation_disabled",
+                message="Remote participation is disabled",
+                status_code=403,
+            )
 
         contributor = self.db.get(RemoteContributor, contributor_id)
         if contributor is None or contributor.assessment_id != assessment_id:
-            raise AppError(code="contributor_not_found", message="Contributor not found for this invite", status_code=404)
+            raise AppError(
+                code="contributor_not_found",
+                message="Contributor not found for this invite",
+                status_code=404,
+            )
 
         clean_body = sanitize_remote_text(body, max_len=20000).strip()
         if not clean_body:
-            raise AppError(code="empty_contribution", message="Contribution text is required", status_code=400)
+            raise AppError(
+                code="empty_contribution", message="Contribution text is required", status_code=400
+            )
 
         topic = self._topic_for_assessment(assessment)
         contribution = RemoteContribution(
@@ -337,10 +365,14 @@ class RemoteParticipationService:
             )
         return RemoteContributionListOut(
             items=[self._contribution_out(row) for row in rows],
-            pending_count=pending if status != RemoteContributionStatus.PENDING.value else len(rows),
+            pending_count=pending
+            if status != RemoteContributionStatus.PENDING.value
+            else len(rows),
         )
 
-    def get_contribution(self, assessment_id: str, contribution_id: str) -> RemoteContributionHostOut:
+    def get_contribution(
+        self, assessment_id: str, contribution_id: str
+    ) -> RemoteContributionHostOut:
         row = self._require_contribution(assessment_id, contribution_id)
         return self._contribution_out(row)
 
@@ -354,7 +386,11 @@ class RemoteParticipationService:
     ) -> RemoteDispositionOut:
         row = self._require_contribution(assessment_id, contribution_id)
         if row.status != RemoteContributionStatus.PENDING.value and action == "include":
-            raise AppError(code="already_disposed", message="Contribution is no longer pending", status_code=409)
+            raise AppError(
+                code="already_disposed",
+                message="Contribution is no longer pending",
+                status_code=409,
+            )
 
         affected: list[str] = []
         notification: str | None = None
@@ -382,13 +418,10 @@ class RemoteParticipationService:
                 after = self.interview.get_session(assessment_id)
                 if after.current_question != frozen.current_question:
                     host_unchanged = False
-                notification = (
-                    f"Included contribution from {row.contributor.display_name}. "
-                    + (
-                        f"Practices affected: {', '.join(affected)}."
-                        if affected
-                        else "No practice coverage changes were produced."
-                    )
+                notification = f"Included contribution from {row.contributor.display_name}. " + (
+                    f"Practices affected: {', '.join(affected)}."
+                    if affected
+                    else "No practice coverage changes were produced."
                 )
         elif action == "defer":
             row.status = RemoteContributionStatus.DEFERRED.value
@@ -397,7 +430,9 @@ class RemoteParticipationService:
             row.status = RemoteContributionStatus.DISMISSED.value
             notification = f"Dismissed contribution from {row.contributor.display_name}."
         else:
-            raise AppError(code="invalid_disposition", message="Unknown disposition action", status_code=400)
+            raise AppError(
+                code="invalid_disposition", message="Unknown disposition action", status_code=400
+            )
 
         row.disposition_by = actor
         row.disposition_at = datetime.now(UTC)
@@ -429,17 +464,29 @@ class RemoteParticipationService:
             code = str(exc)
             raise AppError(code=code, message="Invite link is not valid", status_code=401) from exc
         if payload.get("role") != "remote":
-            raise AppError(code="token_invalid", message="Invite link is not valid for remote access", status_code=401)
+            raise AppError(
+                code="token_invalid",
+                message="Invite link is not valid for remote access",
+                status_code=401,
+            )
         jti = str(payload["jti"])
         assessment_id = str(payload.get("assessment_id", ""))
-        revoked = self.db.scalar(select(AccessTokenRevocation).where(AccessTokenRevocation.jti == jti))
+        revoked = self.db.scalar(
+            select(AccessTokenRevocation).where(AccessTokenRevocation.jti == jti)
+        )
         if revoked is not None:
-            raise AppError(code="token_revoked", message="Invite link has been revoked", status_code=401)
+            raise AppError(
+                code="token_revoked", message="Invite link has been revoked", status_code=401
+            )
         invite = self.db.scalar(select(RemoteInvite).where(RemoteInvite.jti == jti))
         if invite is None or invite.assessment_id != assessment_id:
-            raise AppError(code="invite_not_found", message="Invite link is not recognized", status_code=401)
+            raise AppError(
+                code="invite_not_found", message="Invite link is not recognized", status_code=401
+            )
         if invite.revoked_at is not None:
-            raise AppError(code="token_revoked", message="Invite link has been revoked", status_code=401)
+            raise AppError(
+                code="token_revoked", message="Invite link has been revoked", status_code=401
+            )
         expires = invite.expires_at
         if expires.tzinfo is None:
             expires = expires.replace(tzinfo=UTC)
@@ -448,7 +495,9 @@ class RemoteParticipationService:
         return {"jti": jti, "assessment_id": assessment_id, "role": "remote"}
 
     def _topic_for_assessment(self, assessment: Assessment) -> dict[str, str]:
-        session = self.db.scalar(select(InterviewSession).where(InterviewSession.assessment_id == assessment.id))
+        session = self.db.scalar(
+            select(InterviewSession).where(InterviewSession.assessment_id == assessment.id)
+        )
         if session and session.current_question:
             return {
                 "topic_label": session.topic_label or "Current topic",
@@ -475,7 +524,11 @@ class RemoteParticipationService:
         data: bytes,
     ) -> None:
         if len(data) > MAX_ATTACHMENT_BYTES:
-            raise AppError(code="attachment_too_large", message="Attachment exceeds 2 MB limit", status_code=400)
+            raise AppError(
+                code="attachment_too_large",
+                message="Attachment exceeds 2 MB limit",
+                status_code=400,
+            )
         if len(data) == 0:
             raise AppError(code="attachment_empty", message="Attachment is empty", status_code=400)
 
@@ -498,15 +551,29 @@ class RemoteParticipationService:
 
         # Reject path tricks and polyglot-ish names.
         if ".." in safe or "/" in safe or "\\" in safe:
-            raise AppError(code="attachment_name_rejected", message="Unsafe attachment name", status_code=400)
+            raise AppError(
+                code="attachment_name_rejected", message="Unsafe attachment name", status_code=400
+            )
 
         # Basic content sniffing for common types.
         if content_type == "application/pdf" and not data.startswith(b"%PDF"):
-            raise AppError(code="attachment_content_mismatch", message="PDF content does not match type", status_code=400)
+            raise AppError(
+                code="attachment_content_mismatch",
+                message="PDF content does not match type",
+                status_code=400,
+            )
         if content_type == "image/png" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise AppError(code="attachment_content_mismatch", message="PNG content does not match type", status_code=400)
+            raise AppError(
+                code="attachment_content_mismatch",
+                message="PNG content does not match type",
+                status_code=400,
+            )
         if content_type == "image/jpeg" and not data.startswith(b"\xff\xd8\xff"):
-            raise AppError(code="attachment_content_mismatch", message="JPEG content does not match type", status_code=400)
+            raise AppError(
+                code="attachment_content_mismatch",
+                message="JPEG content does not match type",
+                status_code=400,
+            )
 
         paths = self.storage.ensure_directories()
         directory = paths.uploads / "remote" / contribution.assessment_id / contribution.id
@@ -523,20 +590,32 @@ class RemoteParticipationService:
         invites = list(
             self.db.scalars(
                 select(RemoteInvite)
-                .where(RemoteInvite.assessment_id == assessment_id, RemoteInvite.revoked_at.is_(None))
+                .where(
+                    RemoteInvite.assessment_id == assessment_id, RemoteInvite.revoked_at.is_(None)
+                )
                 .order_by(RemoteInvite.created_at.desc())
             )
         )
         for invite in invites:
-            expires = invite.expires_at if invite.expires_at.tzinfo else invite.expires_at.replace(tzinfo=UTC)
+            expires = (
+                invite.expires_at
+                if invite.expires_at.tzinfo
+                else invite.expires_at.replace(tzinfo=UTC)
+            )
             if expires >= now:
                 return invite
         return None
 
     def _invite_out(self, invite: RemoteInvite, base_url: str) -> RemoteInviteOut:
-        token = decrypt_secret(invite.token_ciphertext, self.settings) if invite.token_ciphertext else ""
+        token = (
+            decrypt_secret(invite.token_ciphertext, self.settings)
+            if invite.token_ciphertext
+            else ""
+        )
         root = (base_url or self.settings.public_base_url or "").rstrip("/")
-        url = f"{root}/?invite={token}" if token and root else (f"/?invite={token}" if token else "")
+        url = (
+            f"{root}/?invite={token}" if token and root else (f"/?invite={token}" if token else "")
+        )
         return RemoteInviteOut(
             jti=invite.jti,
             invite_url=url,
@@ -567,7 +646,9 @@ class RemoteParticipationService:
     def _require_assessment(self, assessment_id: str) -> Assessment:
         assessment = self.db.get(Assessment, assessment_id)
         if assessment is None:
-            raise AppError(code="assessment_not_found", message="Assessment not found", status_code=404)
+            raise AppError(
+                code="assessment_not_found", message="Assessment not found", status_code=404
+            )
         return assessment
 
     def _require_contribution(self, assessment_id: str, contribution_id: str) -> RemoteContribution:
@@ -580,5 +661,7 @@ class RemoteParticipationService:
             )
         )
         if row is None:
-            raise AppError(code="contribution_not_found", message="Contribution not found", status_code=404)
+            raise AppError(
+                code="contribution_not_found", message="Contribution not found", status_code=404
+            )
         return row

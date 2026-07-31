@@ -72,12 +72,17 @@ def test_live_mint_uses_openai_but_returns_only_ephemeral(client: TestClient) ->
     try:
         service = VoiceService(db)
         parent_key = "sk-live-parent-key-do-not-leak"
-        with patch.object(service.settings, "openai_api_key", parent_key), patch("httpx.Client") as client_cls:
+        with (
+            patch.object(service.settings, "openai_api_key", parent_key),
+            patch("httpx.Client") as client_cls,
+        ):
             instance = MagicMock()
             instance.__enter__.return_value = instance
             instance.post.return_value = mock_response
             client_cls.return_value = instance
-            secret, expires, provider = service._mint_live_secret(service._session_config(service.ai.get()))
+            secret, expires, provider = service._mint_live_secret(
+                service._session_config(service.ai.get())
+            )
         assert secret == "ek_ephemeral_from_openai"
         assert provider == "live"
         assert parent_key not in secret
@@ -88,7 +93,9 @@ def test_live_mint_uses_openai_but_returns_only_ephemeral(client: TestClient) ->
 
 def test_temp_audio_cleanup_and_retention_policy(client: TestClient, tmp_data_dir: Path) -> None:
     # Default retention false => tmp file
-    created = client.post("/api/voice/audio/temp", json={"assessment_id": None, "filename": "room.webm"})
+    created = client.post(
+        "/api/voice/audio/temp", json={"assessment_id": None, "filename": "room.webm"}
+    )
     assert created.status_code == 200, created.text
     audio_id = created.json()["id"]
     assert created.json()["retained"] is False

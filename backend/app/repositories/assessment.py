@@ -29,7 +29,9 @@ class AssessmentRepository:
     def list_all(self) -> list[Assessment]:
         return list(self.db.scalars(select(Assessment).order_by(Assessment.created_at.desc())))
 
-    def add_source_selection(self, selection: AssessmentSourceSelection) -> AssessmentSourceSelection:
+    def add_source_selection(
+        self, selection: AssessmentSourceSelection
+    ) -> AssessmentSourceSelection:
         self.db.add(selection)
         self.db.flush()
         return selection

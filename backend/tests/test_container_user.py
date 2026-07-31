@@ -52,7 +52,7 @@ def test_container_runs_with_arbitrary_non_root_uid(built_image: str) -> None:
             "--rm",
             "--user",
             "12345:0",
-            * _base_env(),
+            *_base_env(),
             built_image,
             "python",
             "-c",
@@ -84,7 +84,7 @@ def test_container_persistence_and_graceful_shutdown(built_image: str, tmp_path:
                 "12345:0",
                 "-v",
                 f"{volume}:/data",
-                * _base_env(),
+                *_base_env(),
                 built_image,
             ],
             text=True,
@@ -94,7 +94,14 @@ def test_container_persistence_and_graceful_shutdown(built_image: str, tmp_path:
             ready = False
             for _ in range(40):
                 probe = subprocess.run(
-                    ["docker", "exec", cid, "curl", "-fsS", "http://127.0.0.1:8000/api/health/ready"],
+                    [
+                        "docker",
+                        "exec",
+                        cid,
+                        "curl",
+                        "-fsS",
+                        "http://127.0.0.1:8000/api/health/ready",
+                    ],
                     capture_output=True,
                     text=True,
                 )
@@ -134,7 +141,7 @@ def test_container_persistence_and_graceful_shutdown(built_image: str, tmp_path:
             "12345:0",
             "-v",
             f"{volume}:/data",
-            * _base_env(),
+            *_base_env(),
             built_image,
         ],
         text=True,

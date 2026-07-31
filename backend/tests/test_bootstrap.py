@@ -45,10 +45,7 @@ def test_bootstrap_creates_layout_and_migrates(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setenv(
         "ASSESSMENT_CONFIG_PATH",
         str(
-            Path(__file__).resolve().parents[2]
-            / "config"
-            / "assessment"
-            / "assessment_model.yaml"
+            Path(__file__).resolve().parents[2] / "config" / "assessment" / "assessment_model.yaml"
         ),
     )
     monkeypatch.delenv("DATABASE_URL", raising=False)

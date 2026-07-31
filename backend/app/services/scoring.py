@@ -10,7 +10,13 @@ from app.assessment_config import get_assessment_model_config
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.integrations.http import sanitize_remote_text
-from app.models import Assessment, AssessmentReview, ImprovementAction, InterviewTurn, PracticeCoverage
+from app.models import (
+    Assessment,
+    AssessmentReview,
+    ImprovementAction,
+    InterviewTurn,
+    PracticeCoverage,
+)
 from app.models.enums import AssessmentStatus
 from app.openai.scoring_mock import MockScoringProvider
 from app.schemas.scoring import CandidateScoringAI, DomainRadarPoint, HeatmapCell, PracticeReviewOut
@@ -34,10 +40,14 @@ class ScoringService:
         assessment = self._require(assessment_id)
         status = AssessmentStatus(assessment.status)
         if status == AssessmentStatus.INTERVIEW_COMPLETE:
-            self.lifecycle.transition(assessment, AssessmentStatus.ADMIN_REVIEW, actor_subject=actor)
+            self.lifecycle.transition(
+                assessment, AssessmentStatus.ADMIN_REVIEW, actor_subject=actor
+            )
         elif status != AssessmentStatus.ADMIN_REVIEW:
             if status == AssessmentStatus.PUBLISHED:
-                self.lifecycle.transition(assessment, AssessmentStatus.ADMIN_REVIEW, actor_subject=actor)
+                self.lifecycle.transition(
+                    assessment, AssessmentStatus.ADMIN_REVIEW, actor_subject=actor
+                )
             else:
                 raise AppError(
                     code="invalid_state",
@@ -46,10 +56,16 @@ class ScoringService:
                 )
         return self.generate_candidate_scores(assessment_id, actor=actor)
 
-    def generate_candidate_scores(self, assessment_id: str, *, actor: str = "admin") -> AssessmentReview:
+    def generate_candidate_scores(
+        self, assessment_id: str, *, actor: str = "admin"
+    ) -> AssessmentReview:
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.ADMIN_REVIEW:
-            raise AppError(code="invalid_state", message="Candidate scoring requires admin_review", status_code=409)
+            raise AppError(
+                code="invalid_state",
+                message="Candidate scoring requires admin_review",
+                status_code=409,
+            )
 
         context = self._build_context(assessment)
         provider = self._provider()
@@ -94,7 +110,9 @@ class ScoringService:
                 [sanitize_remote_text(c, max_len=400) for c in item.missing_information][:12]
             )
             coverage.scoring_rationale = sanitize_remote_text(item.rationale, max_len=4000)
-            coverage.recommendation_text = sanitize_remote_text(item.recommendation, max_len=2000) or None
+            coverage.recommendation_text = (
+                sanitize_remote_text(item.recommendation, max_len=2000) or None
+            )
             coverage.scoring_model_version = str(model_name)
             coverage.scoring_prompt_version = prompt_version
 
@@ -112,9 +130,13 @@ class ScoringService:
                     title=sanitize_remote_text(action.title, max_len=240),
                     detail=sanitize_remote_text(action.recommended_action, max_len=2000),
                     observation=sanitize_remote_text(action.observation, max_len=2000),
-                    supporting_evidence=sanitize_remote_text(action.supporting_evidence, max_len=2000),
+                    supporting_evidence=sanitize_remote_text(
+                        action.supporting_evidence, max_len=2000
+                    ),
                     why_it_matters=sanitize_remote_text(action.why_it_matters, max_len=2000),
-                    recommended_action=sanitize_remote_text(action.recommended_action, max_len=2000),
+                    recommended_action=sanitize_remote_text(
+                        action.recommended_action, max_len=2000
+                    ),
                     time_horizon=action.time_horizon,
                     kpi=sanitize_remote_text(action.kpi, max_len=240),
                     priority=action.priority,
@@ -153,11 +175,17 @@ class ScoringService:
         )
         return review
 
-    def domain_rollups(self, assessment: Assessment, *, use_final: bool = True) -> list[DomainRadarPoint]:
+    def domain_rollups(
+        self, assessment: Assessment, *, use_final: bool = True
+    ) -> list[DomainRadarPoint]:
         points: list[DomainRadarPoint] = []
         by_domain: dict[str, list[float]] = {}
         for coverage in assessment.practice_coverages:
-            score = coverage.admin_final_score if use_final and coverage.admin_final_score is not None else coverage.ai_candidate_score
+            score = (
+                coverage.admin_final_score
+                if use_final and coverage.admin_final_score is not None
+                else coverage.ai_candidate_score
+            )
             if score is None:
                 continue
             by_domain.setdefault(coverage.domain_key, []).append(float(score))
@@ -185,7 +213,11 @@ class ScoringService:
         name_by_key = {p.key: p.name for _, p in self.model.ordered_practices()}
         short_by_domain = {d.key: d.short_name for d in self.model.ordered_domains()}
         for coverage in assessment.practice_coverages:
-            score = coverage.admin_final_score if use_final and coverage.admin_final_score is not None else coverage.ai_candidate_score
+            score = (
+                coverage.admin_final_score
+                if use_final and coverage.admin_final_score is not None
+                else coverage.ai_candidate_score
+            )
             cells.append(
                 HeatmapCell(
                     practice_key=coverage.practice_key,
@@ -236,12 +268,24 @@ class ScoringService:
                     status_code=502,
                 )
             if not (1.0 <= item.ai_candidate_score <= 5.0):
-                raise AppError(code="invalid_score_range", message="Score out of 1.0–5.0 range", status_code=502)
-            level = item.named_maturity_level if item.named_maturity_level in levels else self._nearest_level_name(item.ai_candidate_score)
+                raise AppError(
+                    code="invalid_score_range",
+                    message="Score out of 1.0–5.0 range",
+                    status_code=502,
+                )
+            level = (
+                item.named_maturity_level
+                if item.named_maturity_level in levels
+                else self._nearest_level_name(item.ai_candidate_score)
+            )
             cleaned.append(item.model_copy(update={"named_maturity_level": level}))
         for action in result.improvement_actions:
             if action.practice_key not in known:
-                raise AppError(code="unknown_practice_key", message="Improvement references unknown practice", status_code=502)
+                raise AppError(
+                    code="unknown_practice_key",
+                    message="Improvement references unknown practice",
+                    status_code=502,
+                )
             required = [
                 action.observation,
                 action.supporting_evidence,
@@ -250,7 +294,11 @@ class ScoringService:
                 action.kpi,
             ]
             if not all(str(v).strip() for v in required):
-                raise AppError(code="incomplete_improvement_action", message="Improvement action missing required fields", status_code=502)
+                raise AppError(
+                    code="incomplete_improvement_action",
+                    message="Improvement action missing required fields",
+                    status_code=502,
+                )
         return result.model_copy(update={"practice_scores": cleaned})
 
     def _nearest_level_name(self, score: float) -> str:
@@ -279,7 +327,9 @@ class ScoringService:
         )
         source_turn_ids: dict[str, list[str]] = {}
         for coverage in assessment.practice_coverages:
-            source_turn_ids[coverage.practice_key] = json.loads(coverage.source_turn_ids_json or "[]")
+            source_turn_ids[coverage.practice_key] = json.loads(
+                coverage.source_turn_ids_json or "[]"
+            )
 
         limitations: list[str] = []
         integration_failures: list[str] = []
@@ -301,7 +351,9 @@ class ScoringService:
             pass
 
         rubrics = {
-            practice.key: [{"level": r.level, "description": r.description} for r in practice.maturity_rubric]
+            practice.key: [
+                {"level": r.level, "description": r.description} for r in practice.maturity_rubric
+            ]
             for _, practice in self.model.ordered_practices()
         }
         domain_weights = {d.key: d.weight for d in self.model.ordered_domains()}
@@ -310,7 +362,9 @@ class ScoringService:
             "product_service_name": assessment.product_service_name,
             "lookback_days": assessment.lookback_days,
             "influence_mode": assessment.evidence_influence_mode,
-            "coverage_states": {c.practice_key: c.coverage_state for c in assessment.practice_coverages},
+            "coverage_states": {
+                c.practice_key: c.coverage_state for c in assessment.practice_coverages
+            },
             "source_turn_ids": source_turn_ids,
             "answers": [
                 {
@@ -351,5 +405,7 @@ class ScoringService:
             .where(Assessment.id == assessment_id)
         )
         if assessment is None:
-            raise AppError(code="assessment_not_found", message="Assessment not found", status_code=404)
+            raise AppError(
+                code="assessment_not_found", message="Assessment not found", status_code=404
+            )
         return assessment

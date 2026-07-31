@@ -16,7 +16,9 @@ if TYPE_CHECKING:
 class EvidenceSnapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "evidence_snapshots"
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     lookback_days: Mapped[int] = mapped_column(Integer, nullable=False)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     jira_project_key: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -32,15 +34,23 @@ class EvidenceSnapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     assessment: Mapped[Assessment] = relationship(back_populates="evidence_snapshots")
-    metrics: Mapped[list[EvidenceMetric]] = relationship(back_populates="snapshot", cascade="all, delete-orphan")
-    limitations: Mapped[list[EvidenceLimitation]] = relationship(back_populates="snapshot", cascade="all, delete-orphan")
-    exclusions: Mapped[list[EvidenceExclusion]] = relationship(back_populates="snapshot", cascade="all, delete-orphan")
+    metrics: Mapped[list[EvidenceMetric]] = relationship(
+        back_populates="snapshot", cascade="all, delete-orphan"
+    )
+    limitations: Mapped[list[EvidenceLimitation]] = relationship(
+        back_populates="snapshot", cascade="all, delete-orphan"
+    )
+    exclusions: Mapped[list[EvidenceExclusion]] = relationship(
+        back_populates="snapshot", cascade="all, delete-orphan"
+    )
 
 
 class EvidenceMetric(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "evidence_metrics"
 
-    snapshot_id: Mapped[str] = mapped_column(ForeignKey("evidence_snapshots.id", ondelete="CASCADE"), nullable=False, index=True)
+    snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("evidence_snapshots.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     key: Mapped[str] = mapped_column(String(120), nullable=False)
     label: Mapped[str] = mapped_column(String(200), nullable=False)
     value_text: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -57,7 +67,9 @@ class EvidenceMetric(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class EvidenceLimitation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "evidence_limitations"
 
-    snapshot_id: Mapped[str] = mapped_column(ForeignKey("evidence_snapshots.id", ondelete="CASCADE"), nullable=False, index=True)
+    snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("evidence_snapshots.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     code: Mapped[str] = mapped_column(String(80), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     source_system: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -68,7 +80,9 @@ class EvidenceLimitation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class EvidenceExclusion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "evidence_exclusions"
 
-    snapshot_id: Mapped[str] = mapped_column(ForeignKey("evidence_snapshots.id", ondelete="CASCADE"), nullable=False, index=True)
+    snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("evidence_snapshots.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     excluded_by: Mapped[str] = mapped_column(String(120), nullable=False)
     scope_label: Mapped[str] = mapped_column(String(200), nullable=False)

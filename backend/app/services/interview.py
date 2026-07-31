@@ -56,7 +56,9 @@ class InterviewService:
                 status_code=409,
             )
 
-        self.lifecycle.transition(assessment, AssessmentStatus.INTERVIEW_ACTIVE, actor_subject=actor)
+        self.lifecycle.transition(
+            assessment, AssessmentStatus.INTERVIEW_ACTIVE, actor_subject=actor
+        )
         runtime = self.ai_settings.get()
         provider = get_interview_provider(self.db, self.settings)
         context = self._build_context(assessment)
@@ -71,13 +73,17 @@ class InterviewService:
         session.pending_clarification = None
         session.draft_answer_text = ""
         session.last_outcome = "none"
-        session.overall_coverage_summary = "Interview started. Coverage updates appear after each answer."
+        session.overall_coverage_summary = (
+            "Interview started. Coverage updates appear after each answer."
+        )
         session.coverage_confirmation = None
         session.prompt_config_version = self.ai_settings.prompt_config_version()
         session.model_name = runtime.assessment_model
         session.reasoning_effort = runtime.reasoning_effort
         session.provider_mode = provider.name
-        session.last_telemetry_json = json.dumps({**telemetry, "prompt_config_version": session.prompt_config_version})
+        session.last_telemetry_json = json.dumps(
+            {**telemetry, "prompt_config_version": session.prompt_config_version}
+        )
         session.answered_turn_count = 0
         session.paused_at = None
         self.db.flush()
@@ -104,14 +110,18 @@ class InterviewService:
         if status == AssessmentStatus.EVIDENCE_READY:
             return self.start(assessment_id, actor=actor)
         if status != AssessmentStatus.INTERVIEW_ACTIVE:
-            raise AppError(code="interview_not_active", message="Interview is not active", status_code=409)
+            raise AppError(
+                code="interview_not_active", message="Interview is not active", status_code=409
+            )
         session = self._require_session(assessment_id)
         session.interview_status = "active"
         session.paused_at = None
         self.db.flush()
         return self.get_session(assessment_id)
 
-    def save_and_exit(self, assessment_id: str, *, draft: str | None = None, actor: str = "admin") -> InterviewSessionOut:
+    def save_and_exit(
+        self, assessment_id: str, *, draft: str | None = None, actor: str = "admin"
+    ) -> InterviewSessionOut:
         session = self._require_session(assessment_id)
         if draft is not None:
             session.draft_answer_text = draft
@@ -144,7 +154,9 @@ class InterviewService:
     ) -> TurnSubmitOut:
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.INTERVIEW_ACTIVE:
-            raise AppError(code="interview_not_active", message="Interview is not active", status_code=409)
+            raise AppError(
+                code="interview_not_active", message="Interview is not active", status_code=409
+            )
 
         existing = self.db.scalar(
             select(InterviewTurn).where(
@@ -153,15 +165,25 @@ class InterviewService:
             )
         )
         if existing is not None and existing.answer_text is not None:
-            return TurnSubmitOut(session=self.get_session(assessment_id), analysis_summary="Duplicate submission", duplicated=True)
+            return TurnSubmitOut(
+                session=self.get_session(assessment_id),
+                analysis_summary="Duplicate submission",
+                duplicated=True,
+            )
 
         session = self._require_session(assessment_id)
         stop = self.model.stop_criteria
         if session.answered_turn_count >= stop.max_interview_turns:
-            raise AppError(code="max_turns_reached", message="Maximum interview turns reached", status_code=409)
+            raise AppError(
+                code="max_turns_reached", message="Maximum interview turns reached", status_code=409
+            )
 
         if is_clarification and not session.pending_clarification:
-            raise AppError(code="no_pending_clarification", message="No clarification is pending", status_code=400)
+            raise AppError(
+                code="no_pending_clarification",
+                message="No clarification is pending",
+                status_code=400,
+            )
 
         clean_answer = sanitize_remote_text(answer_text, max_len=20000).strip()
         if not clean_answer:
@@ -193,11 +215,15 @@ class InterviewService:
         analysis = self._validate_and_sanitize_analysis(analysis)
         analysis_ref = self._persist_analysis(assessment_id, analysis, telemetry)
 
-        question_text = session.pending_clarification if is_clarification else session.current_question
+        question_text = (
+            session.pending_clarification if is_clarification else session.current_question
+        )
         turn = InterviewTurn(
             assessment_id=assessment_id,
             sequence=self._next_sequence(assessment_id),
-            turn_type=InterviewTurnType.CLARIFICATION.value if is_clarification else InterviewTurnType.BROAD.value,
+            turn_type=InterviewTurnType.CLARIFICATION.value
+            if is_clarification
+            else InterviewTurnType.BROAD.value,
             source=InterviewTurnSource.ROOM_TYPED.value,
             question_text=question_text,
             answer_text=clean_answer,
@@ -268,9 +294,21 @@ class InterviewService:
         )
         self.db.flush()
 
-        covered = [self._practice_name(u.practice_key) for u in analysis.practice_updates if u.coverage_state == CoverageState.SUFFICIENT]
-        partial = [self._practice_name(u.practice_key) for u in analysis.practice_updates if u.coverage_state == CoverageState.PARTIAL]
-        clarify = [self._practice_name(u.practice_key) for u in analysis.practice_updates if u.coverage_state == CoverageState.CLARIFY]
+        covered = [
+            self._practice_name(u.practice_key)
+            for u in analysis.practice_updates
+            if u.coverage_state == CoverageState.SUFFICIENT
+        ]
+        partial = [
+            self._practice_name(u.practice_key)
+            for u in analysis.practice_updates
+            if u.coverage_state == CoverageState.PARTIAL
+        ]
+        clarify = [
+            self._practice_name(u.practice_key)
+            for u in analysis.practice_updates
+            if u.coverage_state == CoverageState.CLARIFY
+        ]
         return TurnSubmitOut(
             session=self.get_session(assessment_id),
             analysis_summary=analysis.response_summary,
@@ -293,7 +331,9 @@ class InterviewService:
         """Analyze a remote contribution without advancing the host interview screen."""
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.INTERVIEW_ACTIVE:
-            raise AppError(code="interview_not_active", message="Interview is not active", status_code=409)
+            raise AppError(
+                code="interview_not_active", message="Interview is not active", status_code=409
+            )
 
         existing = self.db.scalar(
             select(InterviewTurn).where(
@@ -302,7 +342,9 @@ class InterviewService:
             )
         )
         if existing is not None:
-            practice_names = [self._practice_name(k) for k in json.loads(existing.practice_keys_json or "[]")]
+            practice_names = [
+                self._practice_name(k) for k in json.loads(existing.practice_keys_json or "[]")
+            ]
             return {
                 "turn_id": existing.id,
                 "affected_practices": practice_names,
@@ -374,7 +416,11 @@ class InterviewService:
         session.last_outcome = frozen_outcome
         session.last_analysis_ref = analysis_ref
         session.last_telemetry_json = json.dumps(
-            {**telemetry, "prompt_config_version": session.prompt_config_version, "source": "remote_contribution"}
+            {
+                **telemetry,
+                "prompt_config_version": session.prompt_config_version,
+                "source": "remote_contribution",
+            }
         )
         self.db.flush()
 
@@ -385,7 +431,10 @@ class InterviewService:
             message="Remote contribution analyzed without advancing host screen",
             actor_type="admin",
             actor_subject=actor,
-            details={"turn_id": turn.id, "practice_keys": [u.practice_key for u in analysis.practice_updates]},
+            details={
+                "turn_id": turn.id,
+                "practice_keys": [u.practice_key for u in analysis.practice_updates],
+            },
         )
         return {
             "turn_id": turn.id,
@@ -437,7 +486,9 @@ class InterviewService:
     def complete(self, assessment_id: str, *, actor: str = "admin") -> InterviewSessionOut:
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.INTERVIEW_ACTIVE:
-            raise AppError(code="interview_not_active", message="Interview is not active", status_code=409)
+            raise AppError(
+                code="interview_not_active", message="Interview is not active", status_code=409
+            )
         eligible, blockers = self.compute_completion_eligibility(assessment)
         if not eligible:
             raise AppError(
@@ -446,7 +497,9 @@ class InterviewService:
                 status_code=409,
                 details={"blockers": blockers},
             )
-        self.lifecycle.transition(assessment, AssessmentStatus.INTERVIEW_COMPLETE, actor_subject=actor)
+        self.lifecycle.transition(
+            assessment, AssessmentStatus.INTERVIEW_COMPLETE, actor_subject=actor
+        )
         session = self._require_session(assessment_id)
         session.interview_status = "complete"
         self.db.flush()
@@ -513,7 +566,9 @@ class InterviewService:
         if confidences:
             overall = sum(confidences) / len(confidences)
             if overall < stop.min_overall_confidence:
-                blockers.append(f"Overall confidence {overall:.2f} below {stop.min_overall_confidence:.2f}")
+                blockers.append(
+                    f"Overall confidence {overall:.2f} below {stop.min_overall_confidence:.2f}"
+                )
         clarify_open = [c for c in coverages if c.coverage_state == CoverageState.CLARIFY.value]
         if clarify_open:
             blockers.append(f"{len(clarify_open)} practice(s) still need clarification")
@@ -538,8 +593,12 @@ class InterviewService:
                 update.model_copy(
                     update={
                         "evidence_summary": sanitize_remote_text(summary, max_len=2000),
-                        "open_gaps": [sanitize_remote_text(g, max_len=400) for g in update.open_gaps][:12],
-                        "contradictions": [sanitize_remote_text(c, max_len=400) for c in update.contradictions][:12],
+                        "open_gaps": [
+                            sanitize_remote_text(g, max_len=400) for g in update.open_gaps
+                        ][:12],
+                        "contradictions": [
+                            sanitize_remote_text(c, max_len=400) for c in update.contradictions
+                        ][:12],
                     }
                 )
             )
@@ -553,20 +612,30 @@ class InterviewService:
             update={
                 "practice_updates": cleaned_updates,
                 "response_summary": sanitize_remote_text(analysis.response_summary, max_len=4000),
-                "overall_coverage_summary": sanitize_remote_text(analysis.overall_coverage_summary, max_len=4000),
-                "next_best_question": sanitize_remote_text(analysis.next_best_question, max_len=4000),
+                "overall_coverage_summary": sanitize_remote_text(
+                    analysis.overall_coverage_summary, max_len=4000
+                ),
+                "next_best_question": sanitize_remote_text(
+                    analysis.next_best_question, max_len=4000
+                ),
                 "clarification_question": (
                     sanitize_remote_text(analysis.clarification_question, max_len=2000)
                     if analysis.clarification_question
                     else None
                 ),
                 "claims": [sanitize_remote_text(c, max_len=500) for c in analysis.claims][:12],
-                "open_gaps": [sanitize_remote_text(g, max_len=400) for g in analysis.open_gaps][:20],
-                "contradictions": [sanitize_remote_text(c, max_len=400) for c in analysis.contradictions][:20],
+                "open_gaps": [sanitize_remote_text(g, max_len=400) for g in analysis.open_gaps][
+                    :20
+                ],
+                "contradictions": [
+                    sanitize_remote_text(c, max_len=400) for c in analysis.contradictions
+                ][:20],
             }
         )
 
-    def _apply_practice_updates(self, assessment: Assessment, analysis: InterviewAnalysisAI, *, turn_id: str) -> None:
+    def _apply_practice_updates(
+        self, assessment: Assessment, analysis: InterviewAnalysisAI, *, turn_id: str
+    ) -> None:
         by_key = {c.practice_key: c for c in assessment.practice_coverages}
         for update in analysis.practice_updates:
             coverage = by_key.get(update.practice_key)
@@ -601,14 +670,20 @@ class InterviewService:
             coverage.contradictions_json = json.dumps(contras[-20:])
         self.db.flush()
 
-    def _select_next_question(self, assessment: Assessment, analysis: InterviewAnalysisAI) -> dict[str, str]:
+    def _select_next_question(
+        self, assessment: Assessment, analysis: InterviewAnalysisAI
+    ) -> dict[str, str]:
         """Server-side next-best question selection; AI suggestion is advisory only."""
         coverages = {c.practice_key: c for c in assessment.practice_coverages}
         # Priority 1: clarify states
         for domain, practice in self.model.ordered_practices():
             cov = coverages.get(practice.key)
             if cov and cov.coverage_state == CoverageState.CLARIFY.value:
-                seed = practice.clarification_seeds[0].text if practice.clarification_seeds else analysis.next_best_question
+                seed = (
+                    practice.clarification_seeds[0].text
+                    if practice.clarification_seeds
+                    else analysis.next_best_question
+                )
                 return {
                     "question": seed,
                     "why": f"We need clarity on {practice.name} before coverage can advance.",
@@ -617,8 +692,12 @@ class InterviewService:
                 }
         # Priority 2: low confidence / partial
         low = sorted(
-            [c for c in assessment.practice_coverages if c.coverage_state == CoverageState.PARTIAL.value],
-            key=lambda c: (c.confidence or 0.0),
+            [
+                c
+                for c in assessment.practice_coverages
+                if c.coverage_state == CoverageState.PARTIAL.value
+            ],
+            key=lambda c: c.confidence or 0.0,
         )
         if low:
             practice = self.model.require_practice(low[0].practice_key)
@@ -643,7 +722,9 @@ class InterviewService:
                 }
         # Priority 4/6: uncovered + domain balance
         touched_domains = {
-            c.domain_key for c in assessment.practice_coverages if c.coverage_state != CoverageState.NOT_DISCUSSED.value
+            c.domain_key
+            for c in assessment.practice_coverages
+            if c.coverage_state != CoverageState.NOT_DISCUSSED.value
         }
         ordered = self.model.ordered_practices()
         # Prefer domains not yet touched.
@@ -662,7 +743,8 @@ class InterviewService:
             if cov and cov.coverage_state == CoverageState.NOT_DISCUSSED.value:
                 return {
                     "question": practice.question_seeds[0].text,
-                    "why": analysis.reason_for_next_question or "Continuing with uncovered delivery practices.",
+                    "why": analysis.reason_for_next_question
+                    or "Continuing with uncovered delivery practices.",
                     "evidence": self._evidence_blurb(assessment),
                     "topic": domain.short_name,
                 }
@@ -684,7 +766,9 @@ class InterviewService:
                 metrics.append(f"{metric.label}: {metric.value_text}")
                 if metric.key == "ado_pipeline_success" and metric.value_numeric is not None:
                     tool_signals["pipeline_success_rate"] = metric.value_numeric
-        evidence_summary = "; ".join(metrics) if metrics else "No normalized evidence metrics available."
+        evidence_summary = (
+            "; ".join(metrics) if metrics else "No normalized evidence metrics available."
+        )
         return {
             "team_name": assessment.team_name,
             "product_service_name": assessment.product_service_name,
@@ -694,7 +778,9 @@ class InterviewService:
             "evidence_summary": evidence_summary,
             "influence_mode": assessment.evidence_influence_mode,
             "known_practice_keys": sorted(self.model.practice_keys()),
-            "coverage_states": {c.practice_key: c.coverage_state for c in assessment.practice_coverages},
+            "coverage_states": {
+                c.practice_key: c.coverage_state for c in assessment.practice_coverages
+            },
             "tool_signals": tool_signals,
             "required_dimensions": list(self.model.required_evaluation_dimensions),
             "question_priority_guidance": [
@@ -718,9 +804,21 @@ class InterviewService:
         )
 
     def _coverage_confirmation(self, analysis: InterviewAnalysisAI) -> str:
-        covered = [self._practice_name(u.practice_key) for u in analysis.practice_updates if u.coverage_state == CoverageState.SUFFICIENT]
-        partial = [self._practice_name(u.practice_key) for u in analysis.practice_updates if u.coverage_state == CoverageState.PARTIAL]
-        clarify = [self._practice_name(u.practice_key) for u in analysis.practice_updates if u.coverage_state == CoverageState.CLARIFY]
+        covered = [
+            self._practice_name(u.practice_key)
+            for u in analysis.practice_updates
+            if u.coverage_state == CoverageState.SUFFICIENT
+        ]
+        partial = [
+            self._practice_name(u.practice_key)
+            for u in analysis.practice_updates
+            if u.coverage_state == CoverageState.PARTIAL
+        ]
+        clarify = [
+            self._practice_name(u.practice_key)
+            for u in analysis.practice_updates
+            if u.coverage_state == CoverageState.CLARIFY
+        ]
         parts: list[str] = []
         if covered:
             parts.append(f"This covered {', '.join(covered)}")
@@ -756,7 +854,9 @@ class InterviewService:
             )
         return out
 
-    def _persist_analysis(self, assessment_id: str, analysis: InterviewAnalysisAI, telemetry: dict[str, Any]) -> str:
+    def _persist_analysis(
+        self, assessment_id: str, analysis: InterviewAnalysisAI, telemetry: dict[str, Any]
+    ) -> str:
         root = self.storage.ensure_directories().working / "interview" / assessment_id
         root.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -834,7 +934,9 @@ class InterviewService:
         return count
 
     def _get_or_create_session(self, assessment_id: str) -> InterviewSession:
-        session = self.db.scalar(select(InterviewSession).where(InterviewSession.assessment_id == assessment_id))
+        session = self.db.scalar(
+            select(InterviewSession).where(InterviewSession.assessment_id == assessment_id)
+        )
         if session is None:
             session = InterviewSession(assessment_id=assessment_id)
             self.db.add(session)
@@ -842,9 +944,15 @@ class InterviewService:
         return session
 
     def _require_session(self, assessment_id: str) -> InterviewSession:
-        session = self.db.scalar(select(InterviewSession).where(InterviewSession.assessment_id == assessment_id))
+        session = self.db.scalar(
+            select(InterviewSession).where(InterviewSession.assessment_id == assessment_id)
+        )
         if session is None:
-            raise AppError(code="interview_session_missing", message="Interview session not found", status_code=404)
+            raise AppError(
+                code="interview_session_missing",
+                message="Interview session not found",
+                status_code=404,
+            )
         return session
 
     def _require(self, assessment_id: str) -> Assessment:
@@ -858,5 +966,7 @@ class InterviewService:
             )
         )
         if assessment is None:
-            raise AppError(code="assessment_not_found", message="Assessment not found", status_code=404)
+            raise AppError(
+                code="assessment_not_found", message="Assessment not found", status_code=404
+            )
         return assessment

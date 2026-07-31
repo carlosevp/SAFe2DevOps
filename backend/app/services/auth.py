@@ -23,7 +23,9 @@ class AdminAuthService:
                 status_code=503,
             )
         if not verify_password(password, self.settings.admin_password_hash):
-            raise AppError(code="invalid_credentials", message="Invalid credentials", status_code=401)
+            raise AppError(
+                code="invalid_credentials", message="Invalid credentials", status_code=401
+            )
 
         token = issue_admin_session_token(self.settings)
         response.set_cookie(
@@ -49,9 +51,13 @@ class AdminAuthService:
 
     def require_admin(self, cookie_value: str | None) -> dict[str, str]:
         if not cookie_value:
-            raise AppError(code="unauthenticated", message="Authentication required", status_code=401)
+            raise AppError(
+                code="unauthenticated", message="Authentication required", status_code=401
+            )
         try:
             payload = verify_admin_session_token(self.settings, cookie_value)
         except ValueError as exc:
-            raise AppError(code="unauthenticated", message="Authentication required", status_code=401) from exc
+            raise AppError(
+                code="unauthenticated", message="Authentication required", status_code=401
+            ) from exc
         return {"role": "admin", "subject": str(payload.get("sub", "admin"))}

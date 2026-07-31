@@ -70,7 +70,9 @@ def test_opening_question_uses_context(client: TestClient) -> None:
     assert "claim" in q
     assert "claims-api" in q
     assert "90" in q
-    assert "question" not in json.dumps(session).lower() or "of 16" not in session["current_question"]
+    assert (
+        "question" not in json.dumps(session).lower() or "of 16" not in session["current_question"]
+    )
     assert "of 16" not in session["current_question"]
     assert session.get("practices")
     dumped = json.dumps(session)
@@ -133,7 +135,11 @@ def test_multi_practice_coverage_and_clarification(client: TestClient) -> None:
     # Short answer forces clarification.
     short = client.post(
         f"/api/assessments/{assessment_id}/interview/turns",
-        json={"answer_text": "We deploy sometimes.", "idempotency_key": "short-turn-1", "is_clarification": False},
+        json={
+            "answer_text": "We deploy sometimes.",
+            "idempotency_key": "short-turn-1",
+            "is_clarification": False,
+        },
     )
     assert short.status_code == 200, short.text
     assert short.json()["session"]["last_outcome"] == "clarify"
@@ -169,7 +175,10 @@ def test_duplicate_submission_idempotent(client: TestClient) -> None:
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["duplicated"] is True
-    assert first.json()["session"]["answered_turn_count"] == second.json()["session"]["answered_turn_count"]
+    assert (
+        first.json()["session"]["answered_turn_count"]
+        == second.json()["session"]["answered_turn_count"]
+    )
 
 
 def test_openai_failure_keeps_session_retryable(client: TestClient) -> None:
@@ -267,7 +276,9 @@ def test_completion_gating_server_side(client: TestClient) -> None:
     factory = get_session_factory()
     db = factory()
     try:
-        rows = db.scalars(select(PracticeCoverage).where(PracticeCoverage.assessment_id == assessment_id)).all()
+        rows = db.scalars(
+            select(PracticeCoverage).where(PracticeCoverage.assessment_id == assessment_id)
+        ).all()
         for row in rows:
             row.coverage_state = CoverageState.SUFFICIENT.value
             row.confidence = 0.8
@@ -313,7 +324,11 @@ def test_ai_settings_update(client: TestClient) -> None:
     assert current.json()["assessment_model"]
     updated = client.put(
         "/api/ai-settings",
-        json={"assessment_model": "gpt-5.6-terra", "reasoning_effort": "low", "interview_provider": "mock"},
+        json={
+            "assessment_model": "gpt-5.6-terra",
+            "reasoning_effort": "low",
+            "interview_provider": "mock",
+        },
     )
     assert updated.status_code == 200
     assert updated.json()["reasoning_effort"] == "low"

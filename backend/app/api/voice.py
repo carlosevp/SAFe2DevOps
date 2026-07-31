@@ -54,7 +54,9 @@ def register_temp_audio(
     _: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> TempAudioOut:
-    out = VoiceService(db).register_temp_audio(assessment_id=body.assessment_id, filename=body.filename)
+    out = VoiceService(db).register_temp_audio(
+        assessment_id=body.assessment_id, filename=body.filename
+    )
     db.commit()
     return out
 

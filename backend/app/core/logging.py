@@ -45,7 +45,10 @@ def redact_secrets(value: Any) -> Any:
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
-    return any(part in lowered for part in ("password", "secret", "token", "api_key", "apikey", "authorization"))
+    return any(
+        part in lowered
+        for part in ("password", "secret", "token", "api_key", "apikey", "authorization")
+    )
 
 
 def _replace_match(match: re.Match[str]) -> str:
@@ -60,7 +63,9 @@ def configure_logging(level: str = "INFO") -> None:
     if not root.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] [request_id=%(request_id)s] %(message)s")
+            logging.Formatter(
+                "%(asctime)s %(levelname)s [%(name)s] [request_id=%(request_id)s] %(message)s"
+            )
         )
         handler.addFilter(RedactingFilter())
         handler.addFilter(RequestIdFilter())

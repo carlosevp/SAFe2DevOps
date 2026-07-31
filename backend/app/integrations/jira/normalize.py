@@ -26,7 +26,12 @@ def normalize_jira_issues(
             approximate_wip=0,
             release_version_usage=0,
             acceptance_criteria_presence_rate=None,
-            limitations=[{"code": "connection_failure", "message": "Jira connection failed; no issues retrieved."}],
+            limitations=[
+                {
+                    "code": "connection_failure",
+                    "message": "Jira connection failed; no issues retrieved.",
+                }
+            ],
             quality="connection_failure",
             metrics=[],
             raw_issue_count=0,
@@ -50,7 +55,9 @@ def normalize_jira_issues(
             approximate_wip=0,
             release_version_usage=0,
             acceptance_criteria_presence_rate=None,
-            limitations=[{"code": "no_activity", "message": "No Jira issues found in the lookback window."}],
+            limitations=[
+                {"code": "no_activity", "message": "No Jira issues found in the lookback window."}
+            ],
             quality="no_activity",
             metrics=_metric_rows(0, {}, 0, 0, None, None, 0, 0, 0, None),
             raw_issue_count=0,
@@ -67,17 +74,26 @@ def normalize_jira_issues(
     ]
     now = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
     aging = [(now - i.created).total_seconds() / 86400.0 for i in issues if i.resolved is None]
-    wip = sum(1 for i in issues if i.status.lower() in {"in progress", "in review", "selected for development"})
+    wip = sum(
+        1
+        for i in issues
+        if i.status.lower() in {"in progress", "in review", "selected for development"}
+    )
     with_ac = sum(1 for i in issues if i.acceptance_criteria)
     ac_rate = with_ac / len(issues) if issues else None
     reopened = sum(1 for i in issues if i.reopened)
-    release_usage = sum(1 for i in issues if any(c.get("field") == "Fix Version" for c in i.changelog))
+    release_usage = sum(
+        1 for i in issues if any(c.get("field") == "Fix Version" for c in i.changelog)
+    )
 
     limitations: list[dict[str, str]] = []
     quality = "reliable"
     if len(issues) < 5:
         limitations.append(
-            {"code": "incomplete_tool_adoption", "message": "Very few issues in period; tooling may be underused."}
+            {
+                "code": "incomplete_tool_adoption",
+                "message": "Very few issues in period; tooling may be underused.",
+            }
         )
         quality = "incomplete_adoption"
     if lookback_days < 45 and len(completed) < 10:
@@ -162,7 +178,13 @@ def _metric_rows(
         ),
         _m("jira_reopened_work", "Reopened work", str(reopened), float(reopened), "down"),
         _m("jira_wip", "Work in progress", f"{wip} items", float(wip), "neutral"),
-        _m("jira_release_usage", "Release/version usage", str(release_usage), float(release_usage), "up"),
+        _m(
+            "jira_release_usage",
+            "Release/version usage",
+            str(release_usage),
+            float(release_usage),
+            "up",
+        ),
         _m(
             "jira_ac_presence_rate",
             "Acceptance criteria presence",

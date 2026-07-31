@@ -21,16 +21,26 @@ class IntegrationConfiguration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     jira_site_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     jira_service_account_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     jira_api_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
-    jira_status: Mapped[str] = mapped_column(String(32), nullable=False, default=ConnectionStatus.UNKNOWN.value)
-    jira_last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    jira_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=ConnectionStatus.UNKNOWN.value
+    )
+    jira_last_validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     jira_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     ado_org_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ado_pat_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
-    ado_status: Mapped[str] = mapped_column(String(32), nullable=False, default=ConnectionStatus.UNKNOWN.value)
-    ado_last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ado_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=ConnectionStatus.UNKNOWN.value
+    )
+    ado_last_validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     ado_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    catalog_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    catalog_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

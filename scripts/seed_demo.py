@@ -24,9 +24,9 @@ def main() -> int:
     init_engine(settings)
     db = get_session_factory()()
     try:
-        assessment = SeedService(db).seed_demo()
+        assessment = SeedService(db).seed_demo(publish=True)
         db.commit()
-        print(f"Seeded assessment id={assessment.id} status={assessment.status}")
+        print(f"Seeded assessment id={assessment.id} status={assessment.status} team={assessment.team_name}")
         return 0
     finally:
         db.close()

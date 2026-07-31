@@ -12,7 +12,9 @@ class IntegrationRepository:
 
     def get_singleton(self) -> IntegrationConfiguration | None:
         return self.db.scalar(
-            select(IntegrationConfiguration).where(IntegrationConfiguration.singleton_key == "default")
+            select(IntegrationConfiguration).where(
+                IntegrationConfiguration.singleton_key == "default"
+            )
         )
 
     def get_or_create_singleton(self) -> IntegrationConfiguration:

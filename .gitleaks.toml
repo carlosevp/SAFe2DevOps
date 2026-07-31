@@ -1,0 +1,20 @@
+title = "SAFe2DevOps gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and demo placeholders (not production secrets)"
+paths = [
+  '''backend/tests/.*''',
+  '''e2e/.*''',
+  '''\.env\.example$''',
+  '''deploy/openshift/secret\.example\.yaml$''',
+]
+regexes = [
+  '''dup-key-[0-9]+''',
+  '''demo-jira-token-not-real''',
+  '''demo-ado-pat-not-real''',
+  '''unit-test-.*-key.*''',
+  '''docker-test-.*-key.*''',
+]

@@ -33,11 +33,19 @@ class MockAdoProvider:
 
     def list_repositories(self, project_id: str) -> list[AdoRepository]:
         if project_id != "p1":
-            return [AdoRepository(id="r-other", name="shared-tools", project_id=project_id, default_branch="main")]
+            return [
+                AdoRepository(
+                    id="r-other", name="shared-tools", project_id=project_id, default_branch="main"
+                )
+            ]
         return [
             AdoRepository(id="r-api", name="claims-api", project_id="p1", default_branch="main"),
-            AdoRepository(id="r-portal", name="claims-portal", project_id="p1", default_branch="main"),
-            AdoRepository(id="r-libs", name="claims-shared-libs", project_id="p1", default_branch="main"),
+            AdoRepository(
+                id="r-portal", name="claims-portal", project_id="p1", default_branch="main"
+            ),
+            AdoRepository(
+                id="r-libs", name="claims-shared-libs", project_id="p1", default_branch="main"
+            ),
         ]
 
     def list_branches(self, project_id: str, repository_id: str) -> list[str]:
@@ -45,17 +53,26 @@ class MockAdoProvider:
 
     def get_default_branch(self, project_id: str, repository_id: str) -> str:
         repos = {r.id: r for r in self.list_repositories(project_id)}
-        return repos.get(repository_id, AdoRepository(id=repository_id, name="x", project_id=project_id, default_branch="main")).default_branch
+        return repos.get(
+            repository_id,
+            AdoRepository(id=repository_id, name="x", project_id=project_id, default_branch="main"),
+        ).default_branch
 
-    def list_pipelines(self, project_id: str, repository_name: str | None = None) -> list[AdoPipeline]:
-        prefix = "claims-api" if (repository_name or "claims-api").startswith("claims") else "shared"
+    def list_pipelines(
+        self, project_id: str, repository_name: str | None = None
+    ) -> list[AdoPipeline]:
+        prefix = (
+            "claims-api" if (repository_name or "claims-api").startswith("claims") else "shared"
+        )
         return [
             AdoPipeline(id="pl1", name=f"{prefix}-CI", project_id=project_id),
             AdoPipeline(id="pl2", name=f"{prefix}-CD-prod", project_id=project_id),
             AdoPipeline(id="pl3", name=f"{prefix}-PR-validation", project_id=project_id),
         ]
 
-    def list_commits(self, *, project_id: str, repository_id: str, lookback_days: int, default_branch: str) -> list[AdoCommit]:
+    def list_commits(
+        self, *, project_id: str, repository_id: str, lookback_days: int, default_branch: str
+    ) -> list[AdoCommit]:
         now = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
         commits: list[AdoCommit] = []
         for idx in range(312 if repository_id == "r-api" else 40):
@@ -77,7 +94,9 @@ class MockAdoProvider:
             )
         return commits
 
-    def list_pull_requests(self, *, project_id: str, repository_id: str, lookback_days: int) -> list[AdoPullRequest]:
+    def list_pull_requests(
+        self, *, project_id: str, repository_id: str, lookback_days: int
+    ) -> list[AdoPullRequest]:
         now = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
         prs: list[AdoPullRequest] = []
         completed = 44 if repository_id == "r-api" else 8

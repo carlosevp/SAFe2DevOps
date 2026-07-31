@@ -41,8 +41,12 @@ def require_admin_or_dev_mock(
     settings: Settings = Depends(settings_dep),
     auth: AdminAuthService = Depends(admin_auth_dep),
 ) -> dict[str, str]:
-    """Allow mock-host access in local/test mock mode for Figma wiring."""
-    if settings.integration_provider == "mock" and settings.app_env in {"development", "test"}:
+    """Allow mock-host access only when explicitly enabled for local/test mock mode."""
+    if (
+        settings.allow_mock_host_auth
+        and settings.integration_provider == "mock"
+        and settings.app_env in {"development", "test"}
+    ):
         cookie = request.cookies.get(settings.session_cookie_name)
         if cookie:
             try:

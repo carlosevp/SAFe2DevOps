@@ -40,7 +40,11 @@ class PublicationService:
     def publish(self, assessment_id: str, *, published_by: str = "admin") -> PublishedReport:
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.ADMIN_REVIEW:
-            raise AppError(code="invalid_state", message="Assessment must be in admin_review to publish", status_code=409)
+            raise AppError(
+                code="invalid_state",
+                message="Assessment must be in admin_review to publish",
+                status_code=409,
+            )
 
         review = self.db.scalar(
             select(AssessmentReview)
@@ -48,12 +52,20 @@ class PublicationService:
             .order_by(AssessmentReview.created_at.desc())
         )
         if review is None or not review.ready_to_publish:
-            raise AppError(code="review_not_approved", message="Approve the review package before publishing", status_code=409)
+            raise AppError(
+                code="review_not_approved",
+                message="Approve the review package before publishing",
+                status_code=409,
+            )
 
         scores: dict[str, float] = {}
         ai_vs_final: dict[str, dict] = {}
         for coverage in assessment.practice_coverages:
-            final = coverage.admin_final_score if coverage.admin_final_score is not None else coverage.ai_candidate_score
+            final = (
+                coverage.admin_final_score
+                if coverage.admin_final_score is not None
+                else coverage.ai_candidate_score
+            )
             if final is None:
                 raise AppError(
                     code="scores_incomplete",
@@ -63,14 +75,20 @@ class PublicationService:
             scores[coverage.practice_key] = float(final)
             ai_vs_final[coverage.practice_key] = {
                 "ai_candidate_score": coverage.ai_candidate_score,
-                "admin_final_score": coverage.admin_final_score if coverage.admin_final_score is not None else float(final),
+                "admin_final_score": coverage.admin_final_score
+                if coverage.admin_final_score is not None
+                else float(final),
                 "admin_rationale": coverage.admin_rationale,
                 "named_maturity_level": coverage.named_maturity_level,
             }
 
         radar = self.scoring.domain_rollups(assessment, use_final=True)
         heatmap = self.scoring.heatmap(assessment, use_final=True)
-        overall = review.overall_maturity if review.overall_maturity is not None else self.scoring.weighted_overall(radar)
+        overall = (
+            review.overall_maturity
+            if review.overall_maturity is not None
+            else self.scoring.weighted_overall(radar)
+        )
         chart_summary = review.notes or (
             f"Overall maturity {overall}/5.0 across four SAFe DevOps domains with "
             f"{sum(1 for s in scores.values() if s >= 2.0)} practices assessed."
@@ -119,7 +137,14 @@ class PublicationService:
             lookback_days=assessment.lookback_days,
             evidence_influence_mode=assessment.evidence_influence_mode,
             prompt_config_version=self.model.version,
-            model_name=next((c.scoring_model_version for c in assessment.practice_coverages if c.scoring_model_version), "mock"),
+            model_name=next(
+                (
+                    c.scoring_model_version
+                    for c in assessment.practice_coverages
+                    if c.scoring_model_version
+                ),
+                "mock",
+            ),
             ai_vs_final_json=json.dumps(ai_vs_final),
             chart_summary=chart_summary,
         )
@@ -152,7 +177,9 @@ class PublicationService:
         # Public export must never include AI candidate comparison.
         assert "ai_candidate_score" not in json.dumps(public_payload.get("scores"))
 
-        report.export_json_relpath = write_json_export(self.storage, assessment_id, version, public_payload)
+        report.export_json_relpath = write_json_export(
+            self.storage, assessment_id, version, public_payload
+        )
         pdf_lines = [
             report.title,
             f"Version {version} · Published {report.published_at.date().isoformat()}",
@@ -173,23 +200,33 @@ class PublicationService:
             "",
             chart_summary,
         ]
-        report.export_pdf_relpath = write_pdf_export(self.storage, assessment_id, version, pdf_lines)
+        report.export_pdf_relpath = write_pdf_export(
+            self.storage, assessment_id, version, pdf_lines
+        )
 
         for action in assessment.improvement_actions:
             action.is_published = True
-        self.lifecycle.transition(assessment, AssessmentStatus.PUBLISHED, actor_subject=published_by)
+        self.lifecycle.transition(
+            assessment, AssessmentStatus.PUBLISHED, actor_subject=published_by
+        )
         self.audit.record(
             assessment_id=assessment_id,
             event_type="assessment.published",
             message=f"Published report version {version}",
             actor_type="admin",
             actor_subject=published_by,
-            details={"version": version, "export_json": report.export_json_relpath, "export_pdf": report.export_pdf_relpath},
+            details={
+                "version": version,
+                "export_json": report.export_json_relpath,
+                "export_pdf": report.export_pdf_relpath,
+            },
         )
         self.db.flush()
         return report
 
-    def get_published_results(self, assessment_id: str, version: int | None = None) -> PublishedResultsOut:
+    def get_published_results(
+        self, assessment_id: str, version: int | None = None
+    ) -> PublishedResultsOut:
         report = self._get_report(assessment_id, version)
         assessment = self._require(assessment_id)
         scores = json.loads(report.scores_json)
@@ -243,7 +280,9 @@ class PublicationService:
             scores=scores,
         )
 
-    def get_admin_comparison(self, assessment_id: str, version: int | None = None) -> AdminPublishedComparisonOut:
+    def get_admin_comparison(
+        self, assessment_id: str, version: int | None = None
+    ) -> AdminPublishedComparisonOut:
         report = self._get_report(assessment_id, version)
         comparison = json.loads(report.ai_vs_final_json or "{}")
         rows = [{"practice_key": key, **value} for key, value in comparison.items()]
@@ -258,13 +297,17 @@ class PublicationService:
         report = self._get_report(assessment_id, version)
         rel = report.export_pdf_relpath if kind == "pdf" else report.export_json_relpath
         if not rel:
-            raise AppError(code="export_missing", message="Export has not been generated", status_code=404)
+            raise AppError(
+                code="export_missing", message="Export has not been generated", status_code=404
+            )
         return resolve_export_path(self.storage, rel)
 
     def update_report(self, report_id: str, **_fields: object) -> PublishedReport:
         report = self.publications.get(report_id)
         if report is None:
-            raise AppError(code="report_not_found", message="Published report not found", status_code=404)
+            raise AppError(
+                code="report_not_found", message="Published report not found", status_code=404
+            )
         raise AppError(
             code="report_immutable",
             message="Published reports are immutable; publish a new version for corrections",
@@ -286,7 +329,9 @@ class PublicationService:
                 )
             )
         if report is None:
-            raise AppError(code="report_not_found", message="Published report not found", status_code=404)
+            raise AppError(
+                code="report_not_found", message="Published report not found", status_code=404
+            )
         return report
 
     def _require(self, assessment_id: str) -> Assessment:
@@ -299,5 +344,7 @@ class PublicationService:
             .where(Assessment.id == assessment_id)
         )
         if assessment is None:
-            raise AppError(code="assessment_not_found", message="Assessment not found", status_code=404)
+            raise AppError(
+                code="assessment_not_found", message="Assessment not found", status_code=404
+            )
         return assessment

@@ -36,7 +36,11 @@ class ReviewService:
         assessment = self._require(assessment_id)
         review = self._latest_review(assessment_id)
         radar = self.scoring.domain_rollups(assessment, use_final=True)
-        overall = review.overall_maturity if review and review.overall_maturity is not None else self.scoring.weighted_overall(radar)
+        overall = (
+            review.overall_maturity
+            if review and review.overall_maturity is not None
+            else self.scoring.weighted_overall(radar)
+        )
         actions = [
             ImprovementActionOut(
                 id=a.id,
@@ -52,7 +56,8 @@ class ReviewService:
                 priority=a.priority,
             )
             for a in assessment.improvement_actions
-            if not a.is_published or AssessmentStatus(assessment.status) == AssessmentStatus.ADMIN_REVIEW
+            if not a.is_published
+            or AssessmentStatus(assessment.status) == AssessmentStatus.ADMIN_REVIEW
         ]
         ai_vs_final = [
             {
@@ -82,7 +87,14 @@ class ReviewService:
             heatmap=self.scoring.heatmap(assessment, use_final=True),
             chart_summary=review.notes or "" if review else "",
             prompt_config_version=self.model.version,
-            model_name=next((c.scoring_model_version for c in assessment.practice_coverages if c.scoring_model_version), None),
+            model_name=next(
+                (
+                    c.scoring_model_version
+                    for c in assessment.practice_coverages
+                    if c.scoring_model_version
+                ),
+                None,
+            ),
             ready_to_publish=bool(review.ready_to_publish) if review else False,
             ai_vs_final=ai_vs_final,
         )
@@ -104,16 +116,30 @@ class ReviewService:
     ) -> ReviewPackageOut:
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.ADMIN_REVIEW:
-            raise AppError(code="invalid_state", message="Scores can only be adjusted during admin review", status_code=409)
+            raise AppError(
+                code="invalid_state",
+                message="Scores can only be adjusted during admin review",
+                status_code=409,
+            )
         coverage = self._coverage(assessment, practice_key)
         if accept_candidate:
             if coverage.ai_candidate_score is None:
-                raise AppError(code="no_candidate_score", message="No candidate score to accept", status_code=400)
+                raise AppError(
+                    code="no_candidate_score",
+                    message="No candidate score to accept",
+                    status_code=400,
+                )
             coverage.admin_final_score = float(coverage.ai_candidate_score)
-            coverage.admin_rationale = rationale.strip() if rationale else "Accepted AI candidate score"
+            coverage.admin_rationale = (
+                rationale.strip() if rationale else "Accepted AI candidate score"
+            )
         else:
             if score is None:
-                raise AppError(code="score_required", message="Score is required when not accepting candidate", status_code=400)
+                raise AppError(
+                    code="score_required",
+                    message="Score is required when not accepting candidate",
+                    status_code=400,
+                )
             self.assessments.set_admin_score(
                 assessment_id,
                 practice_key,
@@ -149,7 +175,9 @@ class ReviewService:
         self.db.flush()
         return self.get_package(assessment_id)
 
-    def add_observation(self, assessment_id: str, practice_key: str, *, observation: str, actor: str) -> ReviewPackageOut:
+    def add_observation(
+        self, assessment_id: str, practice_key: str, *, observation: str, actor: str
+    ) -> ReviewPackageOut:
         assessment = self._require(assessment_id)
         coverage = self._coverage(assessment, practice_key)
         coverage.admin_observation = sanitize_remote_text(observation, max_len=4000)
@@ -186,10 +214,16 @@ class ReviewService:
         self.db.flush()
         return self.get_package(assessment_id)
 
-    def edit_improvement(self, assessment_id: str, action_id: str, body: ImprovementEditIn, *, actor: str) -> ReviewPackageOut:
+    def edit_improvement(
+        self, assessment_id: str, action_id: str, body: ImprovementEditIn, *, actor: str
+    ) -> ReviewPackageOut:
         action = self.db.get(ImprovementAction, action_id)
         if action is None or action.assessment_id != assessment_id:
-            raise AppError(code="improvement_not_found", message="Improvement action not found", status_code=404)
+            raise AppError(
+                code="improvement_not_found",
+                message="Improvement action not found",
+                status_code=404,
+            )
         for field in (
             "title",
             "observation",
@@ -203,7 +237,11 @@ class ReviewService:
             value = getattr(body, field)
             if value is not None:
                 if isinstance(value, str):
-                    setattr(action, field, sanitize_remote_text(value, max_len=2000 if field != "title" else 240))
+                    setattr(
+                        action,
+                        field,
+                        sanitize_remote_text(value, max_len=2000 if field != "title" else 240),
+                    )
                 else:
                     setattr(action, field, value)
         if body.recommended_action is not None:
@@ -219,24 +257,34 @@ class ReviewService:
         self.db.flush()
         return self.get_package(assessment_id)
 
-    def reopen_topic(self, assessment_id: str, practice_key: str, *, actor: str) -> ReviewPackageOut:
+    def reopen_topic(
+        self, assessment_id: str, practice_key: str, *, actor: str
+    ) -> ReviewPackageOut:
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.ADMIN_REVIEW:
-            raise AppError(code="invalid_state", message="Reopen requires admin_review", status_code=409)
+            raise AppError(
+                code="invalid_state", message="Reopen requires admin_review", status_code=409
+            )
         coverage = self._coverage(assessment, practice_key)
         coverage.coverage_state = CoverageState.CLARIFY.value
         practice = self.model.require_practice(practice_key)
-        session = self.db.scalar(select(InterviewSession).where(InterviewSession.assessment_id == assessment_id))
+        session = self.db.scalar(
+            select(InterviewSession).where(InterviewSession.assessment_id == assessment_id)
+        )
         if session:
             session.interview_status = "active"
             session.pending_clarification = None
-            session.current_question = practice.clarification_seeds[0].text if practice.clarification_seeds else (
-                f"Let's revisit {practice.name}. What concrete examples can the team share?"
+            session.current_question = (
+                practice.clarification_seeds[0].text
+                if practice.clarification_seeds
+                else (f"Let's revisit {practice.name}. What concrete examples can the team share?")
             )
             session.topic_label = practice.name
             session.why_asking = "Admin reopened this unresolved topic during review."
             session.last_outcome = "none"
-        self.lifecycle.transition(assessment, AssessmentStatus.INTERVIEW_ACTIVE, actor_subject=actor)
+        self.lifecycle.transition(
+            assessment, AssessmentStatus.INTERVIEW_ACTIVE, actor_subject=actor
+        )
         self.audit.record(
             assessment_id=assessment_id,
             event_type="assessment.topic_reopened",
@@ -251,8 +299,14 @@ class ReviewService:
     def approve(self, assessment_id: str, *, actor: str) -> ReviewPackageOut:
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.ADMIN_REVIEW:
-            raise AppError(code="invalid_state", message="Approve requires admin_review", status_code=409)
-        missing = [c.practice_key for c in assessment.practice_coverages if c.admin_final_score is None and c.ai_candidate_score is None]
+            raise AppError(
+                code="invalid_state", message="Approve requires admin_review", status_code=409
+            )
+        missing = [
+            c.practice_key
+            for c in assessment.practice_coverages
+            if c.admin_final_score is None and c.ai_candidate_score is None
+        ]
         if missing:
             raise AppError(
                 code="scores_incomplete",
@@ -264,7 +318,9 @@ class ReviewService:
         for coverage in assessment.practice_coverages:
             if coverage.admin_final_score is None and coverage.ai_candidate_score is not None:
                 coverage.admin_final_score = coverage.ai_candidate_score
-                coverage.admin_rationale = coverage.admin_rationale or "Accepted AI candidate score on approve"
+                coverage.admin_rationale = (
+                    coverage.admin_rationale or "Accepted AI candidate score on approve"
+                )
         review = self._latest_review(assessment_id)
         if review is None:
             review = AssessmentReview(assessment_id=assessment_id, reviewer_subject=actor)
@@ -286,7 +342,9 @@ class ReviewService:
         for coverage in assessment.practice_coverages:
             if coverage.practice_key == practice_key:
                 return coverage
-        raise AppError(code="coverage_missing", message="Practice coverage not found", status_code=404)
+        raise AppError(
+            code="coverage_missing", message="Practice coverage not found", status_code=404
+        )
 
     def _latest_review(self, assessment_id: str) -> AssessmentReview | None:
         return self.db.scalar(
@@ -306,5 +364,7 @@ class ReviewService:
             .where(Assessment.id == assessment_id)
         )
         if assessment is None:
-            raise AppError(code="assessment_not_found", message="Assessment not found", status_code=404)
+            raise AppError(
+                code="assessment_not_found", message="Assessment not found", status_code=404
+            )
         return assessment

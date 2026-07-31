@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from statistics import median
 
-from app.integrations.ado.types import AdoCommit, AdoNormalizedEvidence, AdoPipelineRun, AdoPullRequest
+from app.integrations.ado.types import (
+    AdoCommit,
+    AdoNormalizedEvidence,
+    AdoPipelineRun,
+    AdoPullRequest,
+)
 from app.integrations.http import sanitize_remote_text
 
 
@@ -57,7 +62,10 @@ def normalize_ado_evidence(
     quality = "reliable"
     if len(commits) < 10:
         limitations.append(
-            {"code": "incomplete_tool_adoption", "message": "Low commit volume may indicate incomplete ADO adoption."}
+            {
+                "code": "incomplete_tool_adoption",
+                "message": "Low commit volume may indicate incomplete ADO adoption.",
+            }
         )
         quality = "incomplete_adoption"
     if linkage is not None and linkage < 0.5:
@@ -86,9 +94,23 @@ def normalize_ado_evidence(
 
     metrics = [
         _m("ado_commits", "Commit activity", f"{len(commits)} commits", float(len(commits)), "up"),
-        _m("ado_active_commit_days", "Active commit days", str(active_days), float(active_days), "up"),
-        _m("ado_prs_completed", "Pull requests completed", str(len(completed)), float(len(completed)), "up"),
-        _m("ado_prs_abandoned", "Abandoned PRs", str(len(abandoned)), float(len(abandoned)), "down"),
+        _m(
+            "ado_active_commit_days",
+            "Active commit days",
+            str(active_days),
+            float(active_days),
+            "up",
+        ),
+        _m(
+            "ado_prs_completed",
+            "Pull requests completed",
+            str(len(completed)),
+            float(len(completed)),
+            "up",
+        ),
+        _m(
+            "ado_prs_abandoned", "Abandoned PRs", str(len(abandoned)), float(len(abandoned)), "down"
+        ),
         _m(
             "ado_median_pr_days",
             "Median PR completion",
@@ -103,7 +125,13 @@ def normalize_ado_evidence(
             review_avg,
             "up",
         ),
-        _m("ado_direct_default_commits", "Direct commits to default branch", str(direct), float(direct), "down"),
+        _m(
+            "ado_direct_default_commits",
+            "Direct commits to default branch",
+            str(direct),
+            float(direct),
+            "down",
+        ),
         _m(
             "ado_jira_linkage",
             "Jira-key linkage",
@@ -169,7 +197,11 @@ def apply_exclusions(
     filtered_prs = pull_requests
     filtered_runs = runs
     if "Bot commits" in exclusions:
-        filtered_commits = [c for c in filtered_commits if "bot@" not in c.author.lower() and "dependabot" not in c.comment.lower()]
+        filtered_commits = [
+            c
+            for c in filtered_commits
+            if "bot@" not in c.author.lower() and "dependabot" not in c.comment.lower()
+        ]
     if "Emergency hotfix issues" in exclusions:
         filtered_prs = [pr for pr in filtered_prs if "hotfix" not in pr.title.lower()]
     if "Experimental pipelines" in exclusions:
@@ -218,4 +250,3 @@ def _m(key: str, label: str, value_text: str, value_numeric: float | None, trend
         "trend": trend,
         "freshness_label": "snapshot",
     }
-

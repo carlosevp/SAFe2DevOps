@@ -29,6 +29,7 @@ dependencies = [
 dev = [
   "pytest>=9.0.0",
   "pytest-asyncio>=1.0.0",
+  "pytest-cov>=6.0.0",
   "ruff>=0.9.0",
   "mypy>=1.14.0",
   "types-PyYAML>=6.0.0",
@@ -43,6 +44,15 @@ include = ["app*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "--cov=app --cov-report=term-missing:skip-covered --cov-fail-under=55"
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+omit = ["app/alembic/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
 
 [tool.ruff]
 line-length = 100

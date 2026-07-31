@@ -34,10 +34,14 @@ class Assessment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     participation_mode: Mapped[str] = mapped_column(
         String(32), nullable=False, default=ParticipationMode.HYBRID_REMOTE.value
     )
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default=AssessmentStatus.SETUP.value)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=AssessmentStatus.SETUP.value
+    )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    remote_participation_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    remote_participation_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     source_selection: Mapped[AssessmentSourceSelection | None] = relationship(
         back_populates="assessment", uselist=False, cascade="all, delete-orphan"
@@ -72,7 +76,9 @@ class AssessmentSourceSelection(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "assessment_source_selections"
     __table_args__ = (UniqueConstraint("assessment_id", name="uq_source_selection_assessment"),)
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False
+    )
     jira_project_key: Mapped[str] = mapped_column(String(64), nullable=False)
     jira_project_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     jira_board_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

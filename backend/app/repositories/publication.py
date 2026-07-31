@@ -12,7 +12,9 @@ class PublicationRepository:
 
     def next_version(self, assessment_id: str) -> int:
         current = self.db.scalar(
-            select(func.max(PublishedReport.version)).where(PublishedReport.assessment_id == assessment_id)
+            select(func.max(PublishedReport.version)).where(
+                PublishedReport.assessment_id == assessment_id
+            )
         )
         return int(current or 0) + 1
 

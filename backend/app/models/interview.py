@@ -20,10 +20,16 @@ class InterviewTurn(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UniqueConstraint("assessment_id", "sequence", name="uq_interview_turn_sequence"),
     )
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
-    turn_type: Mapped[str] = mapped_column(String(32), nullable=False, default=InterviewTurnType.BROAD.value)
-    source: Mapped[str] = mapped_column(String(32), nullable=False, default=InterviewTurnSource.ROOM_TYPED.value)
+    turn_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=InterviewTurnType.BROAD.value
+    )
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=InterviewTurnSource.ROOM_TYPED.value
+    )
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     practice_keys_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")

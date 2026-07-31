@@ -17,7 +17,9 @@ if TYPE_CHECKING:
 class RemoteInvite(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "remote_invites"
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     jti: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     token_ciphertext: Mapped[str] = mapped_column(Text, nullable=False, default="")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -31,7 +33,9 @@ class RemoteInvite(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class RemoteContributor(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "remote_contributors"
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     invite_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -45,7 +49,9 @@ class RemoteContributor(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class RemoteContribution(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "remote_contributions"
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     contributor_id: Mapped[str] = mapped_column(
         ForeignKey("remote_contributors.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -53,7 +59,9 @@ class RemoteContribution(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     question_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     evidence_context: Mapped[str] = mapped_column(Text, nullable=False, default="")
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default=RemoteContributionStatus.PENDING.value)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=RemoteContributionStatus.PENDING.value
+    )
     content_trust: Mapped[str] = mapped_column(String(32), nullable=False, default="untrusted")
     attachment_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     attachment_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)

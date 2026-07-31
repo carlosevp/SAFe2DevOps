@@ -47,11 +47,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         # Allow same-origin microphone for workshop WebRTC voice capture; keep camera/geo blocked.
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), microphone=(self), geolocation=()"
+        )
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
         if self.enable_hsts:
-            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
         return response
 
 
@@ -74,9 +78,30 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         origin = request.headers.get("origin")
+        fetch_site = (request.headers.get("sec-fetch-site") or "").lower()
+        if fetch_site == "cross-site":
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": {
+                        "code": "csrf_origin_rejected",
+                        "message": "Cross-site request is not allowed",
+                    }
+                },
+            )
         if not origin:
-            # Same-origin navigations / TestClient often omit Origin; allow.
-            return await call_next(request)
+            # Same-origin fetch / TestClient often omit Origin; allow only when not cross-site.
+            if fetch_site in {"", "same-origin", "same-site", "none"}:
+                return await call_next(request)
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": {
+                        "code": "csrf_origin_rejected",
+                        "message": "Request origin is not allowed",
+                    }
+                },
+            )
 
         allowed = set(settings.cors_origin_list)
         if settings.public_base_url:
@@ -86,6 +111,11 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
         if origin_base not in allowed and origin not in allowed:
             return JSONResponse(
                 status_code=403,
-                content={"error": {"code": "csrf_origin_rejected", "message": "Request origin is not allowed"}},
+                content={
+                    "error": {
+                        "code": "csrf_origin_rejected",
+                        "message": "Request origin is not allowed",
+                    }
+                },
             )
         return await call_next(request)

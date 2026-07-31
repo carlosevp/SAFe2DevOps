@@ -27,7 +27,11 @@ class LiveInterviewProvider:
         max_output_tokens: int = 2048,
     ) -> None:
         if not api_key:
-            raise AppError(code="openai_not_configured", message="OPENAI_API_KEY is not configured", status_code=503)
+            raise AppError(
+                code="openai_not_configured",
+                message="OPENAI_API_KEY is not configured",
+                status_code=503,
+            )
         self.api_key = api_key
         self.model = model
         self.reasoning_effort = reasoning_effort
@@ -44,7 +48,9 @@ class LiveInterviewProvider:
             ) from exc
         return OpenAI(api_key=self.api_key, timeout=OPENAI_TIMEOUT_SECONDS)
 
-    def generate_opening_question(self, context: dict[str, Any]) -> tuple[OpeningQuestionAI, dict[str, Any]]:
+    def generate_opening_question(
+        self, context: dict[str, Any]
+    ) -> tuple[OpeningQuestionAI, dict[str, Any]]:
         instructions = (
             "You generate the opening question for a SAFe DevOps adaptive assessment. "
             "Produce a contextual version of an end-to-end delivery journey question. "
@@ -112,7 +118,11 @@ class LiveInterviewProvider:
                 )
                 parsed = response.output_parsed
                 if parsed is None:
-                    raise AppError(code="openai_empty_output", message="OpenAI returned no structured output", status_code=502)
+                    raise AppError(
+                        code="openai_empty_output",
+                        message="OpenAI returned no structured output",
+                        status_code=502,
+                    )
                 usage = getattr(response, "usage", None)
                 telemetry = {
                     "provider": self.name,

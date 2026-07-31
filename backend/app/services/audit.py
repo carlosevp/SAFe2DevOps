@@ -55,7 +55,10 @@ class AuditService:
         redacted = redact_secrets(details)
         if not isinstance(redacted, dict):
             return {}
-        return {key: ("***REDACTED***" if self._sensitive(key) else value) for key, value in redacted.items()}
+        return {
+            key: ("***REDACTED***" if self._sensitive(key) else value)
+            for key, value in redacted.items()
+        }
 
     def _sensitive(self, key: str) -> bool:
         lowered = key.lower()

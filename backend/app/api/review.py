@@ -51,7 +51,9 @@ def regenerate_scores(
     admin: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> ReviewPackageOut:
-    ReviewService(db).scoring.generate_candidate_scores(assessment_id, actor=admin.get("subject", "admin"))
+    ReviewService(db).scoring.generate_candidate_scores(
+        assessment_id, actor=admin.get("subject", "admin")
+    )
     db.commit()
     return ReviewService(db).get_package(assessment_id)
 
@@ -153,7 +155,9 @@ def reopen_topic(
     admin: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> ReviewPackageOut:
-    out = ReviewService(db).reopen_topic(assessment_id, practice_key, actor=admin.get("subject", "admin"))
+    out = ReviewService(db).reopen_topic(
+        assessment_id, practice_key, actor=admin.get("subject", "admin")
+    )
     db.commit()
     return out
 
@@ -169,7 +173,9 @@ def edit_improvement(
     admin: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> ReviewPackageOut:
-    out = ReviewService(db).edit_improvement(assessment_id, action_id, body, actor=admin.get("subject", "admin"))
+    out = ReviewService(db).edit_improvement(
+        assessment_id, action_id, body, actor=admin.get("subject", "admin")
+    )
     db.commit()
     return out
 
@@ -191,7 +197,9 @@ def publish_assessment(
     admin: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> PublishedReportOut:
-    report = PublicationService(db).publish(assessment_id, published_by=admin.get("subject", "admin"))
+    report = PublicationService(db).publish(
+        assessment_id, published_by=admin.get("subject", "admin")
+    )
     db.commit()
     return PublishedReportOut(
         id=report.id,
@@ -239,7 +247,9 @@ def download_export(
     if kind not in {"pdf", "json"}:
         from app.core.errors import AppError
 
-        raise AppError(code="invalid_export_kind", message="Export kind must be pdf or json", status_code=400)
+        raise AppError(
+            code="invalid_export_kind", message="Export kind must be pdf or json", status_code=400
+        )
     path = PublicationService(db).export_path(assessment_id, version, kind)
     filename = sanitize_download_name(f"{assessment_id}-v{version}.{kind}")
     media = "application/pdf" if kind == "pdf" else "application/json"

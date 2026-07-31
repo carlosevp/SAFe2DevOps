@@ -59,7 +59,9 @@ def _prepare_assessment(client: TestClient) -> str:
     return assessment_id
 
 
-def _enable_and_invite(client: TestClient, assessment_id: str, ttl_seconds: int | None = None) -> dict:
+def _enable_and_invite(
+    client: TestClient, assessment_id: str, ttl_seconds: int | None = None
+) -> dict:
     enabled = client.put(
         f"/api/assessments/{assessment_id}/remote",
         json={"remote_participation_enabled": True},
@@ -233,7 +235,9 @@ def test_host_disposition_include_updates_coverage_without_advancing(client: Tes
     assert result["contribution"]["status"] == "included"
     assert result["host_question_unchanged"] is True
     assert result["notification"]
-    assert "Practices affected" in result["notification"] or result["affected_practices"] is not None
+    assert (
+        "Practices affected" in result["notification"] or result["affected_practices"] is not None
+    )
 
     after = client.get(f"/api/assessments/{assessment_id}/interview").json()
     assert after["current_question"] == host_question
@@ -280,11 +284,19 @@ def test_defer_and_dismiss_audited(client: TestClient) -> None:
 
     first = client.post(
         "/api/remote/contributions",
-        data={"token": token, "contributor_id": contributor_id, "body": "First note about delivery."},
+        data={
+            "token": token,
+            "contributor_id": contributor_id,
+            "body": "First note about delivery.",
+        },
     )
     second = client.post(
         "/api/remote/contributions",
-        data={"token": token, "contributor_id": contributor_id, "body": "Second note about quality gates."},
+        data={
+            "token": token,
+            "contributor_id": contributor_id,
+            "body": "Second note about quality gates.",
+        },
     )
     deferred = client.post(
         f"/api/assessments/{assessment_id}/remote/contributions/{first.json()['id']}/disposition",

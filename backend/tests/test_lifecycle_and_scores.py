@@ -123,7 +123,10 @@ def test_score_secrecy_and_rationale(client: TestClient, admin_password: str, db
 
     ok = client.put(
         f"/api/assessments/{seed.id}/coverage/develop/admin-score",
-        json={"score": 2.0, "rationale": "Pipeline evidence shows weaker automation than conversation implied."},
+        json={
+            "score": 2.0,
+            "rationale": "Pipeline evidence shows weaker automation than conversation implied.",
+        },
     )
     assert ok.status_code == 200
     assert ok.json()["admin_final_score"] == 2.0
@@ -162,7 +165,9 @@ def test_published_version_immutability(db: Session) -> None:
     assert "ai_candidate_score" not in json.dumps(scores)
 
     # Corrections create a new version via admin_review → publish.
-    LifecycleService(db).transition(assessment, AssessmentStatus.ADMIN_REVIEW, actor_subject="admin")
+    LifecycleService(db).transition(
+        assessment, AssessmentStatus.ADMIN_REVIEW, actor_subject="admin"
+    )
     ReviewService(db).approve(assessment.id, actor="admin")
     report2 = pub.publish(assessment.id, published_by="admin")
     assert report2.version == 2

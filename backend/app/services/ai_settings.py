@@ -25,13 +25,17 @@ class AiSettingsService:
         self.settings = get_settings()
 
     def get(self) -> AiRuntimeSettings:
-        row = self.db.scalar(select(AiRuntimeSettings).where(AiRuntimeSettings.singleton_key == "default"))
+        row = self.db.scalar(
+            select(AiRuntimeSettings).where(AiRuntimeSettings.singleton_key == "default")
+        )
         if row is None:
             model_cfg = get_assessment_model_config()
             row = AiRuntimeSettings(
                 singleton_key="default",
-                assessment_model=self.settings.openai_assessment_model or model_cfg.model_defaults.assessment_model,
-                reasoning_effort=self.settings.openai_reasoning_effort or model_cfg.model_defaults.reasoning_effort,
+                assessment_model=self.settings.openai_assessment_model
+                or model_cfg.model_defaults.assessment_model,
+                reasoning_effort=self.settings.openai_reasoning_effort
+                or model_cfg.model_defaults.reasoning_effort,
                 interview_provider=self.settings.interview_provider,
                 transcription_model=self.settings.openai_transcription_model
                 or model_cfg.model_defaults.transcription_model,
@@ -51,15 +55,25 @@ class AiSettingsService:
         row = self.get()
         if assessment_model is not None:
             if assessment_model not in AVAILABLE_MODELS:
-                raise AppError(code="invalid_ai_model", message="Unsupported assessment model", status_code=400)
+                raise AppError(
+                    code="invalid_ai_model", message="Unsupported assessment model", status_code=400
+                )
             row.assessment_model = assessment_model
         if reasoning_effort is not None:
             if reasoning_effort not in AVAILABLE_EFFORTS:
-                raise AppError(code="invalid_reasoning_effort", message="Unsupported reasoning effort", status_code=400)
+                raise AppError(
+                    code="invalid_reasoning_effort",
+                    message="Unsupported reasoning effort",
+                    status_code=400,
+                )
             row.reasoning_effort = reasoning_effort
         if interview_provider is not None:
             if interview_provider not in {"mock", "live"}:
-                raise AppError(code="invalid_interview_provider", message="Provider must be mock or live", status_code=400)
+                raise AppError(
+                    code="invalid_interview_provider",
+                    message="Provider must be mock or live",
+                    status_code=400,
+                )
             row.interview_provider = interview_provider
         self.audit.record(
             event_type="ai.settings_updated",

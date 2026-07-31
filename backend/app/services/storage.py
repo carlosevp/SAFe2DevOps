@@ -64,7 +64,9 @@ class StorageService:
         ):
             directory.mkdir(parents=True, exist_ok=True)
             self._assert_writable(directory)
-        logger.info("storage directories ready labels=%s", sorted(paths.as_public_labels().values()))
+        logger.info(
+            "storage directories ready labels=%s", sorted(paths.as_public_labels().values())
+        )
         return paths
 
     def validate_ready(self) -> bool:
@@ -72,15 +74,18 @@ class StorageService:
             paths = self.ensure_directories()
         except OSError:
             return False
-        return all(path.is_dir() and os.access(path, os.W_OK) for path in (
-            paths.data_dir,
-            paths.db_dir,
-            paths.uploads,
-            paths.exports,
-            paths.evidence,
-            paths.backups,
-            paths.working,
-        ))
+        return all(
+            path.is_dir() and os.access(path, os.W_OK)
+            for path in (
+                paths.data_dir,
+                paths.db_dir,
+                paths.uploads,
+                paths.exports,
+                paths.evidence,
+                paths.backups,
+                paths.working,
+            )
+        )
 
     @staticmethod
     def _assert_writable(directory: Path) -> None:

@@ -17,4 +17,6 @@ class AccessTokenRevocation(Base):
     assessment_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )

@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     seed_demo_data: bool = False
     integration_provider: Literal["mock", "live"] = "mock"
     interview_provider: Literal["mock", "live"] = "mock"
+    # Explicit opt-in for unauthenticated mock-host admin in local/test only.
+    allow_mock_host_auth: bool = False
 
     @field_validator(
         "data_dir",
@@ -102,6 +104,18 @@ class Settings(BaseSettings):
             self.frontend_dist = packaged if packaged.exists() else candidate
         else:
             self.frontend_dist = self.frontend_dist.resolve()
+
+        if self.assessment_config_path is None:
+            self.assessment_config_path = (
+                _repo_root() / "config" / "assessment" / "assessment_model.yaml"
+            ).resolve()
+        else:
+            cfg = self.assessment_config_path
+            if not cfg.is_absolute():
+                cfg = (_repo_root() / cfg).resolve()
+            else:
+                cfg = cfg.resolve()
+            self.assessment_config_path = cfg
 
         if not self.app_secret_key:
             if self.app_env in {"development", "test"}:

@@ -54,7 +54,9 @@ def issue_assessment_access_token(
 ) -> tuple[str, str, datetime]:
     """Return (token, jti, expires_at)."""
     jti = secrets.token_urlsafe(16)
-    expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds or settings.assessment_token_ttl_seconds)
+    expires_at = datetime.now(UTC) + timedelta(
+        seconds=ttl_seconds or settings.assessment_token_ttl_seconds
+    )
     serializer = build_serializer(settings, salt="assessment-access")
     token = serializer.dumps(
         {

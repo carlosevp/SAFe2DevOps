@@ -13,7 +13,12 @@ from app.integrations.ado.types import (
     AdoPullRequest,
     AdoRepository,
 )
-from app.integrations.http import request_json, sanitize_remote_text, validate_https_url, with_client
+from app.integrations.http import (
+    request_json,
+    sanitize_remote_text,
+    validate_https_url,
+    with_client,
+)
 
 _JIRA_KEY = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
 
@@ -24,10 +29,18 @@ class AdoProvider(Protocol):
     def list_repositories(self, project_id: str) -> list[AdoRepository]: ...
     def list_branches(self, project_id: str, repository_id: str) -> list[str]: ...
     def get_default_branch(self, project_id: str, repository_id: str) -> str: ...
-    def list_pipelines(self, project_id: str, repository_name: str | None = None) -> list[AdoPipeline]: ...
-    def list_commits(self, *, project_id: str, repository_id: str, lookback_days: int, default_branch: str) -> list[AdoCommit]: ...
-    def list_pull_requests(self, *, project_id: str, repository_id: str, lookback_days: int) -> list[AdoPullRequest]: ...
-    def list_pipeline_runs(self, *, project_id: str, pipeline_names: list[str], lookback_days: int) -> list[AdoPipelineRun]: ...
+    def list_pipelines(
+        self, project_id: str, repository_name: str | None = None
+    ) -> list[AdoPipeline]: ...
+    def list_commits(
+        self, *, project_id: str, repository_id: str, lookback_days: int, default_branch: str
+    ) -> list[AdoCommit]: ...
+    def list_pull_requests(
+        self, *, project_id: str, repository_id: str, lookback_days: int
+    ) -> list[AdoPullRequest]: ...
+    def list_pipeline_runs(
+        self, *, project_id: str, pipeline_names: list[str], lookback_days: int
+    ) -> list[AdoPipelineRun]: ...
 
 
 class LiveAdoProvider:
@@ -43,7 +56,11 @@ class LiveAdoProvider:
         def _call(client):
             data = request_json(client, "GET", "/_apis/projects", params={"api-version": "7.1"})
             count = len((data or {}).get("value") or [])
-            return {"ok": True, "organization": self.org_url.rsplit("/", 1)[-1], "project_count": count}
+            return {
+                "ok": True,
+                "organization": self.org_url.rsplit("/", 1)[-1],
+                "project_count": count,
+            }
 
         return with_client(self.org_url, self._headers(), _call)
 
@@ -67,7 +84,9 @@ class LiveAdoProvider:
             )
             repos: list[AdoRepository] = []
             for item in (data or {}).get("value") or []:
-                default_branch = str(item.get("defaultBranch") or "refs/heads/main").replace("refs/heads/", "")
+                default_branch = str(item.get("defaultBranch") or "refs/heads/main").replace(
+                    "refs/heads/", ""
+                )
                 repos.append(
                     AdoRepository(
                         id=str(item.get("id")),
@@ -99,7 +118,9 @@ class LiveAdoProvider:
         repos = {r.id: r for r in self.list_repositories(project_id)}
         return repos.get(repository_id).default_branch if repository_id in repos else "main"
 
-    def list_pipelines(self, project_id: str, repository_name: str | None = None) -> list[AdoPipeline]:
+    def list_pipelines(
+        self, project_id: str, repository_name: str | None = None
+    ) -> list[AdoPipeline]:
         def _call(client):
             data = request_json(
                 client,
@@ -108,7 +129,11 @@ class LiveAdoProvider:
                 params={"api-version": "7.1"},
             )
             pipelines = [
-                AdoPipeline(id=str(item.get("id")), name=sanitize_remote_text(item.get("name")), project_id=project_id)
+                AdoPipeline(
+                    id=str(item.get("id")),
+                    name=sanitize_remote_text(item.get("name")),
+                    project_id=project_id,
+                )
                 for item in (data or {}).get("value") or []
             ]
             if repository_name:
@@ -119,7 +144,9 @@ class LiveAdoProvider:
 
         return with_client(self.org_url, self._headers(), _call)
 
-    def list_commits(self, *, project_id: str, repository_id: str, lookback_days: int, default_branch: str) -> list[AdoCommit]:
+    def list_commits(
+        self, *, project_id: str, repository_id: str, lookback_days: int, default_branch: str
+    ) -> list[AdoCommit]:
         since = (datetime.now(UTC) - timedelta(days=lookback_days)).isoformat()
 
         def _call(client):
@@ -131,7 +158,11 @@ class LiveAdoProvider:
             )
             commits: list[AdoCommit] = []
             for item in (data or {}).get("value") or []:
-                author = (item.get("author") or {}).get("email") or (item.get("author") or {}).get("name") or "unknown"
+                author = (
+                    (item.get("author") or {}).get("email")
+                    or (item.get("author") or {}).get("name")
+                    or "unknown"
+                )
                 commits.append(
                     AdoCommit(
                         commit_id=str(item.get("commitId")),
@@ -145,7 +176,9 @@ class LiveAdoProvider:
 
         return with_client(self.org_url, self._headers(), _call)
 
-    def list_pull_requests(self, *, project_id: str, repository_id: str, lookback_days: int) -> list[AdoPullRequest]:
+    def list_pull_requests(
+        self, *, project_id: str, repository_id: str, lookback_days: int
+    ) -> list[AdoPullRequest]:
         def _call(client):
             data = request_json(
                 client,
@@ -161,7 +194,9 @@ class LiveAdoProvider:
                     continue
                 title = sanitize_remote_text(item.get("title"))
                 reviewers = [
-                    sanitize_remote_text((r.get("displayName") or r.get("uniqueName") or "reviewer"))
+                    sanitize_remote_text(
+                        (r.get("displayName") or r.get("uniqueName") or "reviewer")
+                    )
                     for r in item.get("reviewers") or []
                 ]
                 status = str(item.get("status") or "active").lower()
@@ -169,7 +204,9 @@ class LiveAdoProvider:
                     AdoPullRequest(
                         id=int(item.get("pullRequestId") or 0),
                         title=title,
-                        status="completed" if status == "completed" else ("abandoned" if status == "abandoned" else "active"),
+                        status="completed"
+                        if status == "completed"
+                        else ("abandoned" if status == "abandoned" else "active"),
                         created=created,
                         closed=_parse_dt(item.get("closedDate")),
                         reviewers=reviewers,
@@ -180,7 +217,9 @@ class LiveAdoProvider:
 
         return with_client(self.org_url, self._headers(), _call)
 
-    def list_pipeline_runs(self, *, project_id: str, pipeline_names: list[str], lookback_days: int) -> list[AdoPipelineRun]:
+    def list_pipeline_runs(
+        self, *, project_id: str, pipeline_names: list[str], lookback_days: int
+    ) -> list[AdoPipelineRun]:
         pipelines = {p.name: p for p in self.list_pipelines(project_id)}
         runs: list[AdoPipelineRun] = []
         cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
@@ -207,11 +246,16 @@ class LiveAdoProvider:
                         AdoPipelineRun(
                             id=int(item.get("id") or 0),
                             pipeline_name=pipeline_name,
-                            result="succeeded" if "succeed" in result else ("failed" if "fail" in result else result),
+                            result="succeeded"
+                            if "succeed" in result
+                            else ("failed" if "fail" in result else result),
                             started=started,
                             finished=finished,
-                            duration_seconds=(finished - started).total_seconds() if finished else None,
-                            is_deployment="cd" in pipeline_name.lower() or "deploy" in pipeline_name.lower(),
+                            duration_seconds=(finished - started).total_seconds()
+                            if finished
+                            else None,
+                            is_deployment="cd" in pipeline_name.lower()
+                            or "deploy" in pipeline_name.lower(),
                         )
                     )
                 return local

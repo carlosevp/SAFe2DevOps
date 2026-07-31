@@ -26,7 +26,11 @@ def _sqlite_connect_args(settings: Settings) -> dict[str, Any]:
 
 def create_db_engine(settings: Settings | None = None) -> Engine:
     settings = settings or get_settings()
-    connect_args = _sqlite_connect_args(settings) if settings.database_url and settings.database_url.startswith("sqlite") else {}
+    connect_args = (
+        _sqlite_connect_args(settings)
+        if settings.database_url and settings.database_url.startswith("sqlite")
+        else {}
+    )
     engine = create_engine(
         settings.database_url or "sqlite://",
         connect_args=connect_args,
@@ -54,7 +58,9 @@ def init_engine(settings: Settings | None = None) -> Engine:
     if _engine is not None:
         _engine.dispose()
     _engine = create_db_engine(settings)
-    _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    _SessionLocal = sessionmaker(
+        bind=_engine, autoflush=False, autocommit=False, expire_on_commit=False
+    )
     return _engine
 
 

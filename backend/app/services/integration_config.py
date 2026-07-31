@@ -57,15 +57,21 @@ class IntegrationConfigService:
     def reveal_ado_pat(self, record: IntegrationConfiguration) -> str:
         return decrypt_secret(record.ado_pat_encrypted or "")
 
-    def mark_validated(self, *, system: str, ok: bool, error: str | None = None) -> IntegrationConfiguration:
+    def mark_validated(
+        self, *, system: str, ok: bool, error: str | None = None
+    ) -> IntegrationConfiguration:
         record = self.get()
         now = datetime.now(UTC)
         if system == "jira":
-            record.jira_status = ConnectionStatus.CONNECTED.value if ok else ConnectionStatus.FAILED.value
+            record.jira_status = (
+                ConnectionStatus.CONNECTED.value if ok else ConnectionStatus.FAILED.value
+            )
             record.jira_last_validated_at = now
             record.jira_last_error = None if ok else error
         elif system == "ado":
-            record.ado_status = ConnectionStatus.CONNECTED.value if ok else ConnectionStatus.FAILED.value
+            record.ado_status = (
+                ConnectionStatus.CONNECTED.value if ok else ConnectionStatus.FAILED.value
+            )
             record.ado_last_validated_at = now
             record.ado_last_error = None if ok else error
         self.db.flush()

@@ -52,7 +52,9 @@ def get_remote_settings(
     _: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> RemoteSettingsOut:
-    return RemoteParticipationService(db).get_settings_out(assessment_id, base_url=_base_url(request))
+    return RemoteParticipationService(db).get_settings_out(
+        assessment_id, base_url=_base_url(request)
+    )
 
 
 @router.put("/assessments/{assessment_id}/remote", response_model=RemoteSettingsOut)
@@ -64,7 +66,9 @@ def update_remote_settings(
     db: Session = Depends(get_db_session),
 ) -> RemoteSettingsOut:
     service = RemoteParticipationService(db)
-    service.set_enabled(assessment_id, body.remote_participation_enabled, actor=admin.get("subject", "admin"))
+    service.set_enabled(
+        assessment_id, body.remote_participation_enabled, actor=admin.get("subject", "admin")
+    )
     db.commit()
     return service.get_settings_out(assessment_id, base_url=_base_url(request))
 
@@ -88,19 +92,25 @@ def create_remote_invite(
     return invite
 
 
-@router.post("/assessments/{assessment_id}/remote/invites/{jti}/revoke", response_model=RemoteInviteOut)
+@router.post(
+    "/assessments/{assessment_id}/remote/invites/{jti}/revoke", response_model=RemoteInviteOut
+)
 def revoke_remote_invite(
     assessment_id: str,
     jti: str,
     admin: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> RemoteInviteOut:
-    out = RemoteParticipationService(db).revoke_invite(assessment_id, jti, actor=admin.get("subject", "admin"))
+    out = RemoteParticipationService(db).revoke_invite(
+        assessment_id, jti, actor=admin.get("subject", "admin")
+    )
     db.commit()
     return out
 
 
-@router.get("/assessments/{assessment_id}/remote/contributions", response_model=RemoteContributionListOut)
+@router.get(
+    "/assessments/{assessment_id}/remote/contributions", response_model=RemoteContributionListOut
+)
 def list_remote_contributions(
     assessment_id: str,
     status: str | None = None,

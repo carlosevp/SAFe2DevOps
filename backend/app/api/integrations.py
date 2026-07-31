@@ -45,7 +45,9 @@ def _status_out(db: Session) -> IntegrationStatusOut:
 
 
 @router.get("", response_model=IntegrationStatusOut)
-def get_integrations(_: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)) -> IntegrationStatusOut:
+def get_integrations(
+    _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+) -> IntegrationStatusOut:
     return _status_out(db)
 
 
@@ -78,14 +80,18 @@ def save_ado(
 
 
 @router.post("/jira/test", response_model=ConnectionTestResult)
-def test_jira(_: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)) -> ConnectionTestResult:
+def test_jira(
+    _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+) -> ConnectionTestResult:
     settings = get_settings()
     service = IntegrationConfigService(db)
     record = service.get()
     try:
         if settings.integration_provider == "live":
             if not record.jira_site_url or not record.jira_api_token_encrypted:
-                raise AppError(code="jira_not_configured", message="Jira is not configured", status_code=400)
+                raise AppError(
+                    code="jira_not_configured", message="Jira is not configured", status_code=400
+                )
             validate_https_url(record.jira_site_url, label="Jira site URL")
         providers = get_integration_providers(db, settings)
         result = providers.jira.test_connection()
@@ -104,14 +110,20 @@ def test_jira(_: dict = Depends(require_admin_or_dev_mock), db: Session = Depend
 
 
 @router.post("/ado/test", response_model=ConnectionTestResult)
-def test_ado(_: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)) -> ConnectionTestResult:
+def test_ado(
+    _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+) -> ConnectionTestResult:
     settings = get_settings()
     service = IntegrationConfigService(db)
     try:
         if settings.integration_provider == "live":
             record = service.get()
             if not record.ado_org_url or not record.ado_pat_encrypted:
-                raise AppError(code="ado_not_configured", message="Azure DevOps is not configured", status_code=400)
+                raise AppError(
+                    code="ado_not_configured",
+                    message="Azure DevOps is not configured",
+                    status_code=400,
+                )
             validate_https_url(record.ado_org_url, label="Azure DevOps organization URL")
         providers = get_integration_providers(db, settings)
         result = providers.ado.test_connection()
@@ -130,7 +142,9 @@ def test_ado(_: dict = Depends(require_admin_or_dev_mock), db: Session = Depends
 
 
 @router.post("/catalog/refresh", response_model=IntegrationStatusOut)
-def refresh_catalog(_: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)) -> IntegrationStatusOut:
+def refresh_catalog(
+    _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+) -> IntegrationStatusOut:
     providers = get_integration_providers(db)
     # Touch providers to validate availability.
     providers.jira.list_projects()
@@ -142,36 +156,49 @@ def refresh_catalog(_: dict = Depends(require_admin_or_dev_mock), db: Session = 
 
 
 @router.get("/catalog/jira/projects", response_model=list[CatalogProject])
-def jira_projects(_: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)) -> list[CatalogProject]:
+def jira_projects(
+    _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+) -> list[CatalogProject]:
     projects = get_integration_providers(db).jira.list_projects()
     return [CatalogProject(id=p.id, key=p.key, name=p.name) for p in projects]
 
 
 @router.get("/catalog/jira/projects/{project_key}/boards", response_model=list[CatalogProject])
 def jira_boards(
-    project_key: str, _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+    project_key: str,
+    _: dict = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
 ) -> list[CatalogProject]:
     boards = get_integration_providers(db).jira.list_boards(project_key)
     return [CatalogProject(id=b.id, key=project_key, name=b.name) for b in boards]
 
 
 @router.get("/catalog/ado/projects", response_model=list[CatalogProject])
-def ado_projects(_: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)) -> list[CatalogProject]:
+def ado_projects(
+    _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+) -> list[CatalogProject]:
     projects = get_integration_providers(db).ado.list_projects()
     return [CatalogProject(id=p.id, name=p.name) for p in projects]
 
 
 @router.get("/catalog/ado/projects/{project_id}/repositories", response_model=list[CatalogRepo])
 def ado_repos(
-    project_id: str, _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+    project_id: str,
+    _: dict = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
 ) -> list[CatalogRepo]:
     repos = get_integration_providers(db).ado.list_repositories(project_id)
     return [CatalogRepo(id=r.id, name=r.name, default_branch=r.default_branch) for r in repos]
 
 
-@router.get("/catalog/ado/projects/{project_id}/repositories/{repo_id}/branches", response_model=list[str])
+@router.get(
+    "/catalog/ado/projects/{project_id}/repositories/{repo_id}/branches", response_model=list[str]
+)
 def ado_branches(
-    project_id: str, repo_id: str, _: dict = Depends(require_admin_or_dev_mock), db: Session = Depends(get_db_session)
+    project_id: str,
+    repo_id: str,
+    _: dict = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
 ) -> list[str]:
     return get_integration_providers(db).ado.list_branches(project_id, repo_id)
 
@@ -196,5 +223,9 @@ def ado_pipelines(
         related = [r for r in runs if r.pipeline_name == pipeline.name]
         success = sum(1 for r in related if r.result == "succeeded")
         rate = f"{int(success / len(related) * 100)}%" if related else None
-        out.append(CatalogPipeline(id=pipeline.id, name=pipeline.name, runs=len(related) or None, success_rate=rate))
+        out.append(
+            CatalogPipeline(
+                id=pipeline.id, name=pipeline.name, runs=len(related) or None, success_rate=rate
+            )
+        )
     return out

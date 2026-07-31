@@ -54,7 +54,9 @@ def _snapshot_out(snapshot) -> EvidenceSnapshotOut:
             for m in snapshot.metrics
         ],
         limitations=[
-            EvidenceLimitationOut(code=item.code, message=item.message, source_system=item.source_system)
+            EvidenceLimitationOut(
+                code=item.code, message=item.message, source_system=item.source_system
+            )
             for item in snapshot.limitations
         ],
         exclusions=[item.scope_label for item in snapshot.exclusions],
@@ -136,11 +138,15 @@ def latest_evidence(
     if snapshot is None:
         from app.core.errors import AppError
 
-        raise AppError(code="snapshot_not_found", message="No evidence snapshot yet", status_code=404)
+        raise AppError(
+            code="snapshot_not_found", message="No evidence snapshot yet", status_code=404
+        )
     return _snapshot_out(snapshot)
 
 
-@router.post("/{assessment_id}/evidence/{snapshot_id}/exclusions", response_model=EvidenceSnapshotOut)
+@router.post(
+    "/{assessment_id}/evidence/{snapshot_id}/exclusions", response_model=EvidenceSnapshotOut
+)
 def apply_exclusions(
     assessment_id: str,
     snapshot_id: str,
@@ -153,8 +159,14 @@ def apply_exclusions(
     if snapshot.assessment_id != assessment_id:
         from app.core.errors import AppError
 
-        raise AppError(code="snapshot_mismatch", message="Snapshot does not belong to assessment", status_code=400)
-    updated = service.apply_exclusions(snapshot_id, body.exclusions, excluded_by=admin.get("subject", "admin"))
+        raise AppError(
+            code="snapshot_mismatch",
+            message="Snapshot does not belong to assessment",
+            status_code=400,
+        )
+    updated = service.apply_exclusions(
+        snapshot_id, body.exclusions, excluded_by=admin.get("subject", "admin")
+    )
     db.commit()
     return _snapshot_out(updated)
 
@@ -171,7 +183,11 @@ def confirm_evidence(
     if snapshot.assessment_id != assessment_id:
         from app.core.errors import AppError
 
-        raise AppError(code="snapshot_mismatch", message="Snapshot does not belong to assessment", status_code=400)
+        raise AppError(
+            code="snapshot_mismatch",
+            message="Snapshot does not belong to assessment",
+            status_code=400,
+        )
     confirmed = service.confirm_snapshot(snapshot_id, actor=admin.get("subject", "admin"))
     db.commit()
     return _snapshot_out(confirmed)
@@ -186,13 +202,22 @@ def transition_assessment(
 ) -> AssessmentSummary:
     service = AssessmentService(db)
     assessment = service._require(assessment_id)
-    LifecycleService(db).transition(assessment, body.status, actor_subject=admin.get("subject", "admin"))
+    LifecycleService(db).transition(
+        assessment, body.status, actor_subject=admin.get("subject", "admin")
+    )
     db.commit()
     return AssessmentSummary.model_validate(assessment)
 
 
-@router.get("/{assessment_id}/coverage/participant", response_model=list[PracticeCoverageParticipant])
-def participant_coverage(assessment_id: str, db: Session = Depends(get_db_session)) -> list[PracticeCoverageParticipant]:
+@router.get(
+    "/{assessment_id}/coverage/participant", response_model=list[PracticeCoverageParticipant]
+)
+def participant_coverage(
+    assessment_id: str,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> list[PracticeCoverageParticipant]:
+    """Host/admin workshop coverage — never anonymous (scores omitted from schema)."""
     service = AssessmentService(db)
     assessment = service._require(assessment_id)
     result: list[PracticeCoverageParticipant] = []
@@ -237,7 +262,9 @@ def admin_coverage(
     return result
 
 
-@router.put("/{assessment_id}/coverage/{practice_key}/admin-score", response_model=PracticeCoverageAdmin)
+@router.put(
+    "/{assessment_id}/coverage/{practice_key}/admin-score", response_model=PracticeCoverageAdmin
+)
 def update_admin_score(
     assessment_id: str,
     practice_key: str,

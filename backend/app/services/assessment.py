@@ -46,7 +46,11 @@ class AssessmentService:
         self._validate_lookback(lookback_days)
         influence = EvidenceInfluenceMode(evidence_influence_mode)
         if influence.value not in self.model.evidence_influence_policies:
-            raise AppError(code="invalid_influence_mode", message="Unknown evidence influence mode", status_code=400)
+            raise AppError(
+                code="invalid_influence_mode",
+                message="Unknown evidence influence mode",
+                status_code=400,
+            )
 
         assessment = Assessment(
             team_name=team_name,
@@ -75,16 +79,24 @@ class AssessmentService:
         )
         return assessment
 
-    def set_source_selection(self, assessment_id: str, payload: dict[str, Any]) -> AssessmentSourceSelection:
+    def set_source_selection(
+        self, assessment_id: str, payload: dict[str, Any]
+    ) -> AssessmentSourceSelection:
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) not in {
             AssessmentStatus.SETUP,
             AssessmentStatus.COLLECTING_EVIDENCE,
         }:
-            raise AppError(code="invalid_state", message="Source selection locked for current status", status_code=409)
+            raise AppError(
+                code="invalid_state",
+                message="Source selection locked for current status",
+                status_code=409,
+            )
 
         pipelines = payload.get("selected_pipelines") or []
-        selection = assessment.source_selection or AssessmentSourceSelection(assessment_id=assessment.id)
+        selection = assessment.source_selection or AssessmentSourceSelection(
+            assessment_id=assessment.id
+        )
         selection.jira_project_key = payload["jira_project_key"]
         selection.jira_project_name = payload.get("jira_project_name")
         selection.jira_board_id = payload.get("jira_board_id")
@@ -111,16 +123,27 @@ class AssessmentService:
         self.model.require_practice(practice_key)
         assessment = self._require(assessment_id)
         if AssessmentStatus(assessment.status) != AssessmentStatus.ADMIN_REVIEW:
-            raise AppError(code="invalid_state", message="Scores can only be adjusted during admin review", status_code=409)
+            raise AppError(
+                code="invalid_state",
+                message="Scores can only be adjusted during admin review",
+                status_code=409,
+            )
 
         coverage = self.repo.get_coverage(assessment_id, practice_key)
         if coverage is None:
-            raise AppError(code="coverage_missing", message="Practice coverage row not found", status_code=404)
+            raise AppError(
+                code="coverage_missing", message="Practice coverage row not found", status_code=404
+            )
 
         if not (1.0 <= score <= 5.0):
-            raise AppError(code="invalid_score", message="Score must be between 1.0 and 5.0", status_code=400)
+            raise AppError(
+                code="invalid_score", message="Score must be between 1.0 and 5.0", status_code=400
+            )
 
-        material = coverage.ai_candidate_score is None or abs(float(coverage.ai_candidate_score) - float(score)) > 1e-9
+        material = (
+            coverage.ai_candidate_score is None
+            or abs(float(coverage.ai_candidate_score) - float(score)) > 1e-9
+        )
         if material and not (rationale and rationale.strip()):
             raise AppError(
                 code="rationale_required",
@@ -168,5 +191,7 @@ class AssessmentService:
     def _require(self, assessment_id: str) -> Assessment:
         assessment = self.repo.get(assessment_id)
         if assessment is None:
-            raise AppError(code="assessment_not_found", message="Assessment not found", status_code=404)
+            raise AppError(
+                code="assessment_not_found", message="Assessment not found", status_code=404
+            )
         return assessment

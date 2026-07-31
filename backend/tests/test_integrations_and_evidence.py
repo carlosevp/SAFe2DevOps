@@ -53,10 +53,22 @@ def _select_sources(client: TestClient, assessment_id: str) -> None:
 
 
 def test_https_url_validation() -> None:
-    assert validate_https_url("https://dev.azure.com/org", label="ADO") == "https://dev.azure.com/org"
+    assert (
+        validate_https_url("https://dev.azure.com/org", label="ADO") == "https://dev.azure.com/org"
+    )
+    assert (
+        validate_https_url("https://claimsco.atlassian.net", label="Jira")
+        == "https://claimsco.atlassian.net"
+    )
     with pytest.raises(AppError) as exc:
         validate_https_url("http://insecure.example", label="ADO")
     assert exc.value.code == "invalid_integration_url"
+    with pytest.raises(AppError):
+        validate_https_url("https://127.0.0.1", label="ADO")
+    with pytest.raises(AppError):
+        validate_https_url("https://169.254.169.254/latest", label="ADO")
+    with pytest.raises(AppError):
+        validate_https_url("https://evil.example", label="ADO")
 
 
 def test_prompt_injection_safe_normalization() -> None:
@@ -98,9 +110,13 @@ def test_mock_jira_pagination_and_normalization() -> None:
 
 def test_mock_ado_normalization_and_exclusions() -> None:
     ado = MockAdoProvider()
-    commits = ado.list_commits(project_id="p1", repository_id="r-api", lookback_days=90, default_branch="main")
+    commits = ado.list_commits(
+        project_id="p1", repository_id="r-api", lookback_days=90, default_branch="main"
+    )
     prs = ado.list_pull_requests(project_id="p1", repository_id="r-api", lookback_days=90)
-    runs = ado.list_pipeline_runs(project_id="p1", pipeline_names=["claims-api-CI"], lookback_days=90)
+    runs = ado.list_pipeline_runs(
+        project_id="p1", pipeline_names=["claims-api-CI"], lookback_days=90
+    )
     before = normalize_ado_evidence(commits=commits, pull_requests=prs, runs=runs)
     assert before.commits_in_period > 0
     assert before.completed_pr_count > 0
@@ -183,7 +199,9 @@ def test_catalog_dropdown_dependencies(client: TestClient) -> None:
     repo_id = repos.json()[0]["id"]
     repo_name = repos.json()[0]["name"]
 
-    branches = client.get(f"/api/integrations/catalog/ado/projects/{project_id}/repositories/{repo_id}/branches")
+    branches = client.get(
+        f"/api/integrations/catalog/ado/projects/{project_id}/repositories/{repo_id}/branches"
+    )
     assert branches.status_code == 200
     assert "main" in branches.json()
 
@@ -228,7 +246,9 @@ def test_lookback_period_bounds(client: TestClient) -> None:
     assert ok["lookback_days"] == 30
 
 
-def test_evidence_snapshot_collect_exclusions_immutability(client: TestClient, tmp_data_dir: Path) -> None:
+def test_evidence_snapshot_collect_exclusions_immutability(
+    client: TestClient, tmp_data_dir: Path
+) -> None:
     assessment = _create_assessment(client, lookback_days=90)
     assessment_id = assessment["id"]
     _select_sources(client, assessment_id)

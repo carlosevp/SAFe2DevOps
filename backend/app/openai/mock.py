@@ -52,7 +52,9 @@ class MockInterviewProvider:
 
     name = "mock"
 
-    def generate_opening_question(self, context: dict[str, Any]) -> tuple[OpeningQuestionAI, dict[str, Any]]:
+    def generate_opening_question(
+        self, context: dict[str, Any]
+    ) -> tuple[OpeningQuestionAI, dict[str, Any]]:
         started = time.perf_counter()
         team = context.get("team_name") or "the team"
         product = context.get("product_service_name") or "the product"
@@ -119,13 +121,20 @@ class MockInterviewProvider:
         elif ("pipeline" in lower or "pull request" in lower or "pr " in lower) and not any(
             token in lower for token in ("block", "gate", "fail", "required check", "cannot merge")
         ):
-            if not is_clarification or "quality gate" in pending or "blocked" in pending or "fail" in pending:
+            if (
+                not is_clarification
+                or "quality gate" in pending
+                or "blocked" in pending
+                or "fail" in pending
+            ):
                 needs_clarification = True
                 clarification = (
                     "Are pull requests blocked from merging when the build or a quality gate fails?"
                 )
 
-        if is_clarification and ("yes" in lower or "block" in lower or "fail" in lower or "required" in lower):
+        if is_clarification and (
+            "yes" in lower or "block" in lower or "fail" in lower or "required" in lower
+        ):
             if "build" not in matched:
                 matched.append("build")
             needs_clarification = False
@@ -140,7 +149,12 @@ class MockInterviewProvider:
             conf = 0.72 if word_count >= 40 else 0.5
             gaps: list[str] = []
             contras: list[str] = []
-            if key == "build" and needs_clarification and clarification and "quality gate" in clarification.lower():
+            if (
+                key == "build"
+                and needs_clarification
+                and clarification
+                and "quality gate" in clarification.lower()
+            ):
                 state = CoverageState.CLARIFY
                 conf = 0.45
                 gaps.append("Whether failed quality gates prevent merging")
@@ -151,7 +165,9 @@ class MockInterviewProvider:
             if influence == "evidence_led" and context.get("tool_signals"):
                 signals = context["tool_signals"]
                 if key in {"build", "deploy"} and signals.get("pipeline_success_rate", 100) < 80:
-                    contras.append("Tool evidence shows unstable pipelines while the team described smooth delivery")
+                    contras.append(
+                        "Tool evidence shows unstable pipelines while the team described smooth delivery"
+                    )
                     contradictions.append(contras[-1])
                     if state == CoverageState.SUFFICIENT:
                         state = CoverageState.CLARIFY
@@ -162,7 +178,13 @@ class MockInterviewProvider:
             if influence == "context_only":
                 # Evidence shapes confidence only; do not escalate contradictions from tools.
                 contras = []
-            score = 3.0 if state == CoverageState.SUFFICIENT else 2.0 if state == CoverageState.PARTIAL else None
+            score = (
+                3.0
+                if state == CoverageState.SUFFICIENT
+                else 2.0
+                if state == CoverageState.PARTIAL
+                else None
+            )
             updates.append(
                 PracticeUpdateAI(
                     practice_key=key,
@@ -179,9 +201,7 @@ class MockInterviewProvider:
 
         if not updates and not needs_clarification:
             needs_clarification = True
-            clarification = (
-                "What happens after code is merged—how do you test, deploy, and learn whether the change helped?"
-            )
+            clarification = "What happens after code is merged—how do you test, deploy, and learn whether the change helped?"
 
         next_q, reason = self._next_question(coverage_map, known_keys, matched)
         sufficient = sum(1 for v in coverage_map.values() if v == CoverageState.SUFFICIENT.value)
@@ -191,14 +211,24 @@ class MockInterviewProvider:
         elif sufficient >= 8:
             recommendation = "checkpoint"
 
-        covered_names = [k.replace("_", " ") for k, u in ((u.practice_key, u) for u in updates) if u.coverage_state == CoverageState.SUFFICIENT]
-        partial_names = [k.replace("_", " ") for k, u in ((u.practice_key, u) for u in updates) if u.coverage_state == CoverageState.PARTIAL]
+        covered_names = [
+            k.replace("_", " ")
+            for k, u in ((u.practice_key, u) for u in updates)
+            if u.coverage_state == CoverageState.SUFFICIENT
+        ]
+        partial_names = [
+            k.replace("_", " ")
+            for k, u in ((u.practice_key, u) for u in updates)
+            if u.coverage_state == CoverageState.PARTIAL
+        ]
         summary_bits = []
         if covered_names:
             summary_bits.append(f"This covered {', '.join(covered_names[:3])}")
         if partial_names:
             summary_bits.append(f"partially covered {', '.join(partial_names[:2])}")
-        coverage_summary = ". ".join(summary_bits) + "." if summary_bits else "Limited coverage from this answer."
+        coverage_summary = (
+            ". ".join(summary_bits) + "." if summary_bits else "Limited coverage from this answer."
+        )
 
         analysis = InterviewAnalysisAI(
             response_summary=self._summary(answer),
@@ -227,7 +257,9 @@ class MockInterviewProvider:
         }
         return analysis, telemetry
 
-    def _next_question(self, coverage_map: dict[str, str], known: set[str], matched: list[str]) -> tuple[str, str]:
+    def _next_question(
+        self, coverage_map: dict[str, str], known: set[str], matched: list[str]
+    ) -> tuple[str, str]:
         priority = [
             "hypothesize",
             "collaborate_research",
@@ -250,7 +282,11 @@ class MockInterviewProvider:
             if key not in known:
                 continue
             state = coverage_map.get(key, CoverageState.NOT_DISCUSSED.value)
-            if state in {CoverageState.NOT_DISCUSSED.value, CoverageState.PARTIAL.value, CoverageState.CLARIFY.value}:
+            if state in {
+                CoverageState.NOT_DISCUSSED.value,
+                CoverageState.PARTIAL.value,
+                CoverageState.CLARIFY.value,
+            }:
                 seeds = {
                     "hypothesize": "When you take on new work, how do you decide what outcome you are testing for?",
                     "collaborate_research": "How do customer or stakeholder insights shape what you build next?",

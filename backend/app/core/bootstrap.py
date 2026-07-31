@@ -26,6 +26,10 @@ def validate_configuration(settings: Settings) -> None:
         raise RuntimeError(f"Unsupported SQLITE_JOURNAL_MODE={settings.sqlite_journal_mode}")
     if settings.sqlite_busy_timeout_ms < 100:
         raise RuntimeError("SQLITE_BUSY_TIMEOUT_MS must be >= 100")
+    if settings.allow_mock_host_auth and settings.app_env in {"staging", "production"}:
+        raise RuntimeError("ALLOW_MOCK_HOST_AUTH cannot be enabled outside development/test")
+    if settings.allow_mock_host_auth:
+        logger.warning("ALLOW_MOCK_HOST_AUTH enabled — unauthenticated mock-host admin is active")
     if settings.database_url and settings.database_url.startswith("sqlite"):
         db_path = settings.sqlite_path
         if db_path is None:

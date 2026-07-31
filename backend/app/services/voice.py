@@ -30,7 +30,8 @@ AVAILABLE_TRANSCRIPTION_MODELS = [
     "whisper-1",
 ]
 AVAILABLE_LANGUAGES = ["auto", "en", "en-US", "de", "es", "fr"]
-OPENAI_CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets"
+# Official OpenAI Realtime ephemeral session mint endpoint (not a stored secret value).
+OPENAI_REALTIME_SESSION_URL = "https://api.openai.com/v1/realtime/client_secrets"
 OPENAI_CALLS_URL = "https://api.openai.com/v1/realtime/calls"
 TEMP_AUDIO_TTL_SECONDS = 600
 
@@ -66,17 +67,29 @@ class VoiceService:
         if kwargs.get("transcription_model") is not None:
             model = kwargs["transcription_model"]
             if model not in AVAILABLE_TRANSCRIPTION_MODELS:
-                raise AppError(code="invalid_transcription_model", message="Unsupported transcription model", status_code=400)
+                raise AppError(
+                    code="invalid_transcription_model",
+                    message="Unsupported transcription model",
+                    status_code=400,
+                )
             row.transcription_model = model
         if kwargs.get("voice_language") is not None:
             lang = kwargs["voice_language"]
             if lang not in AVAILABLE_LANGUAGES:
-                raise AppError(code="invalid_voice_language", message="Unsupported voice language", status_code=400)
+                raise AppError(
+                    code="invalid_voice_language",
+                    message="Unsupported voice language",
+                    status_code=400,
+                )
             row.voice_language = lang
         if kwargs.get("voice_stop_mode") is not None:
             mode = kwargs["voice_stop_mode"]
             if mode not in {"manual", "vad"}:
-                raise AppError(code="invalid_voice_stop_mode", message="Stop mode must be manual or vad", status_code=400)
+                raise AppError(
+                    code="invalid_voice_stop_mode",
+                    message="Stop mode must be manual or vad",
+                    status_code=400,
+                )
             row.voice_stop_mode = mode
         if kwargs.get("silence_timeout_ms") is not None:
             row.silence_timeout_ms = int(kwargs["silence_timeout_ms"])
@@ -105,7 +118,11 @@ class VoiceService:
     def create_realtime_session(self, *, actor: str = "admin") -> RealtimeSessionOut:
         row = self.ai.get()
         if not row.voice_enabled:
-            raise AppError(code="voice_disabled", message="Voice transcription is disabled by admin", status_code=403)
+            raise AppError(
+                code="voice_disabled",
+                message="Voice transcription is disabled by admin",
+                status_code=403,
+            )
 
         session_config = self._session_config(row)
         privacy = self._privacy(row)
@@ -196,7 +213,9 @@ class VoiceService:
     def cleanup_temp_audio(self, audio_id: str, *, force: bool = False) -> tuple[bool, bool]:
         record = self.db.scalar(select(VoiceTempAudio).where(VoiceTempAudio.id == audio_id))
         if record is None:
-            raise AppError(code="voice_audio_not_found", message="Temp audio record not found", status_code=404)
+            raise AppError(
+                code="voice_audio_not_found", message="Temp audio record not found", status_code=404
+            )
         if record.retained and not force:
             # Explicit retention: do not delete unless forced by admin policy change/timeout handling.
             return False, False
@@ -208,7 +227,9 @@ class VoiceService:
     def cleanup_expired(self) -> int:
         now = datetime.now(UTC)
         rows = self.db.scalars(
-            select(VoiceTempAudio).where(VoiceTempAudio.cleaned_up.is_(False), VoiceTempAudio.expires_at <= now)
+            select(VoiceTempAudio).where(
+                VoiceTempAudio.cleaned_up.is_(False), VoiceTempAudio.expires_at <= now
+            )
         ).all()
         count = 0
         for row in rows:
@@ -224,7 +245,11 @@ class VoiceService:
     def _mint_live_secret(self, session_config: dict[str, Any]) -> tuple[str, datetime, str]:
         api_key = self.settings.openai_api_key
         if not api_key:
-            raise AppError(code="openai_not_configured", message="OPENAI_API_KEY is required for live voice", status_code=503)
+            raise AppError(
+                code="openai_not_configured",
+                message="OPENAI_API_KEY is required for live voice",
+                status_code=503,
+            )
         payload = {
             "expires_after": {"anchor": "created_at", "seconds": 60},
             "session": session_config,
@@ -232,7 +257,7 @@ class VoiceService:
         try:
             with httpx.Client(timeout=20.0) as client:
                 response = client.post(
-                    OPENAI_CLIENT_SECRETS_URL,
+                    OPENAI_REALTIME_SESSION_URL,
                     headers={
                         "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
@@ -264,14 +289,22 @@ class VoiceService:
         secret = data.get("value") or (data.get("client_secret") or {}).get("value")
         expires_raw = data.get("expires_at") or (data.get("client_secret") or {}).get("expires_at")
         if not secret:
-            raise AppError(code="realtime_session_invalid", message="Realtime credentials missing secret", status_code=502)
+            raise AppError(
+                code="realtime_session_invalid",
+                message="Realtime credentials missing secret",
+                status_code=502,
+            )
         if isinstance(expires_raw, (int, float)):
             expires = datetime.fromtimestamp(expires_raw, tz=UTC)
         else:
             expires = datetime.now(UTC) + timedelta(seconds=60)
         # Ensure we never accidentally echo the long-lived key.
         if secret == api_key or secret.startswith(api_key[:12]):
-            raise AppError(code="realtime_session_unsafe", message="Refusing to return non-ephemeral credential", status_code=500)
+            raise AppError(
+                code="realtime_session_unsafe",
+                message="Refusing to return non-ephemeral credential",
+                status_code=500,
+            )
         return secret, expires, "live"
 
     def _session_config(self, row: AiRuntimeSettings) -> dict[str, Any]:

@@ -16,7 +16,9 @@ if TYPE_CHECKING:
 class AssessmentReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "assessment_reviews"
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     reviewer_subject: Mapped[str] = mapped_column(String(200), nullable=False, default="admin")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     ready_to_publish: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -36,7 +38,9 @@ class AssessmentReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class ImprovementAction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "improvement_actions"
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     practice_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     domain_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
@@ -58,15 +62,21 @@ class PublishedReport(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Versioned immutable publication artifact."""
 
     __tablename__ = "published_reports"
-    __table_args__ = (UniqueConstraint("assessment_id", "version", name="uq_published_report_version"),)
+    __table_args__ = (
+        UniqueConstraint("assessment_id", "version", name="uq_published_report_version"),
+    )
 
-    assessment_id: Mapped[str] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     summary_markdown: Mapped[str] = mapped_column(Text, nullable=False)
     radar_json: Mapped[str] = mapped_column(Text, nullable=False)
     heatmap_json: Mapped[str] = mapped_column(Text, nullable=False)
-    scores_json: Mapped[str] = mapped_column(Text, nullable=False)  # admin final scores only (public)
+    scores_json: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # admin final scores only (public)
     improvement_plan_json: Mapped[str] = mapped_column(Text, nullable=False)
     published_by: Mapped[str] = mapped_column(String(200), nullable=False, default="admin")
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -78,10 +88,16 @@ class PublishedReport(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     maturity_gaps_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     limitations_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     lookback_days: Mapped[int] = mapped_column(Integer, nullable=False, default=90)
-    evidence_influence_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="balanced")
-    prompt_config_version: Mapped[str] = mapped_column(String(80), nullable=False, default="assessment_model.yaml")
+    evidence_influence_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="balanced"
+    )
+    prompt_config_version: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="assessment_model.yaml"
+    )
     model_name: Mapped[str] = mapped_column(String(120), nullable=False, default="mock")
-    ai_vs_final_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # admin-only comparison
+    ai_vs_final_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}"
+    )  # admin-only comparison
     export_json_relpath: Mapped[str | None] = mapped_column(String(500), nullable=True)
     export_pdf_relpath: Mapped[str | None] = mapped_column(String(500), nullable=True)
     chart_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")

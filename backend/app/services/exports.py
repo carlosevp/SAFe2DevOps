@@ -44,7 +44,9 @@ def export_dir(storage: StorageService, assessment_id: str, version: int) -> Pat
     return directory
 
 
-def write_json_export(storage: StorageService, assessment_id: str, version: int, payload: dict[str, Any]) -> str:
+def write_json_export(
+    storage: StorageService, assessment_id: str, version: int, payload: dict[str, Any]
+) -> str:
     directory = export_dir(storage, assessment_id, version)
     filename = sanitize_download_name(f"report-v{version}.json")
     target = directory / filename
@@ -52,7 +54,9 @@ def write_json_export(storage: StorageService, assessment_id: str, version: int,
     return str(target.relative_to(storage.paths().data_dir))
 
 
-def write_pdf_export(storage: StorageService, assessment_id: str, version: int, lines: list[str]) -> str:
+def write_pdf_export(
+    storage: StorageService, assessment_id: str, version: int, lines: list[str]
+) -> str:
     directory = export_dir(storage, assessment_id, version)
     filename = sanitize_download_name(f"report-v{version}.pdf")
     target = directory / filename
@@ -64,7 +68,13 @@ def resolve_export_path(storage: StorageService, relpath: str) -> Path:
     paths = storage.paths()
     candidate = (paths.data_dir / relpath).resolve()
     exports_root = paths.exports.resolve()
-    if not str(candidate).startswith(str(exports_root)) or not candidate.is_file():
+    try:
+        candidate.relative_to(exports_root)
+    except ValueError as exc:
+        raise AppError(
+            code="export_not_found", message="Export file not found", status_code=404
+        ) from exc
+    if not candidate.is_file():
         raise AppError(code="export_not_found", message="Export file not found", status_code=404)
     return candidate
 
@@ -89,7 +99,9 @@ def _minimal_pdf(lines: list[str]) -> bytes:
         b"3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
         b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj\n"
     )
-    objects.append(f"4 0 obj<< /Length {len(stream)} >>stream\n".encode() + stream + b"\nendstream\nendobj\n")
+    objects.append(
+        f"4 0 obj<< /Length {len(stream)} >>stream\n".encode() + stream + b"\nendstream\nendobj\n"
+    )
     objects.append(b"5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n")
 
     out = bytearray(b"%PDF-1.4\n")

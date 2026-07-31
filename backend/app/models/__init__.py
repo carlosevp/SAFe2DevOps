@@ -13,7 +13,12 @@ from app.models.enums import (
     ParticipationMode,
     RemoteContributionStatus,
 )
-from app.models.evidence import EvidenceExclusion, EvidenceLimitation, EvidenceMetric, EvidenceSnapshot
+from app.models.evidence import (
+    EvidenceExclusion,
+    EvidenceLimitation,
+    EvidenceMetric,
+    EvidenceSnapshot,
+)
 from app.models.integration import IntegrationConfiguration
 from app.models.ai_settings import AiRuntimeSettings, InterviewSession, VoiceTempAudio
 from app.models.interview import InterviewTurn

@@ -34,12 +34,18 @@ class AssessmentAccessTokenService:
             payload = verify_assessment_access_token(self.settings, token)
         except ValueError as exc:
             code = str(exc)
-            raise AppError(code=code, message="Assessment access token is not valid", status_code=401) from exc
+            raise AppError(
+                code=code, message="Assessment access token is not valid", status_code=401
+            ) from exc
 
         jti = str(payload["jti"])
         revoked = db.scalar(select(AccessTokenRevocation).where(AccessTokenRevocation.jti == jti))
         if revoked is not None:
-            raise AppError(code="token_revoked", message="Assessment access token has been revoked", status_code=401)
+            raise AppError(
+                code="token_revoked",
+                message="Assessment access token has been revoked",
+                status_code=401,
+            )
 
         return {
             "jti": jti,

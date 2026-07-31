@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api import assessment_model, assessments, auth, health, integrations, interview, remote, review, voice
+from app.api import (
+    assessment_model,
+    assessments,
+    auth,
+    health,
+    integrations,
+    interview,
+    remote,
+    review,
+    voice,
+)
 
 api_router = APIRouter()
 api_router.include_router(health.router)

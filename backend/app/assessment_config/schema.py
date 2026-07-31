@@ -155,7 +155,9 @@ class AssessmentModelConfig(StrictModel):
     def _validate_model(self) -> AssessmentModelConfig:
         expected_policies = {"context_only", "balanced", "evidence_led"}
         if set(self.evidence_influence_policies) != expected_policies:
-            raise ValueError(f"evidence_influence_policies must be exactly {sorted(expected_policies)}")
+            raise ValueError(
+                f"evidence_influence_policies must be exactly {sorted(expected_policies)}"
+            )
 
         level_scores = sorted(level.score for level in self.maturity_levels)
         if level_scores != [1.0, 2.0, 3.0, 4.0, 5.0]:
@@ -176,7 +178,9 @@ class AssessmentModelConfig(StrictModel):
                 if practice.key in practice_keys:
                     raise ValueError(f"duplicate practice key: {practice.key}")
                 practice_keys.add(practice.key)
-                missing_dims = set(self.required_evaluation_dimensions) - set(practice.required_evaluation_dimensions)
+                missing_dims = set(self.required_evaluation_dimensions) - set(
+                    practice.required_evaluation_dimensions
+                )
                 if missing_dims:
                     raise ValueError(
                         f"practice {practice.key} missing required evaluation dimensions: {sorted(missing_dims)}"

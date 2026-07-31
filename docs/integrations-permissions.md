@@ -31,5 +31,9 @@ Organization URL must be HTTPS (`https://dev.azure.com/<org>`).
 
 ## Provider modes
 
-- `INTEGRATION_PROVIDER=mock` (default locally/tests): deterministic mock adapters
+- `INTEGRATION_PROVIDER=mock` (default locally/tests): deterministic mock adapters (Claims / CLAIM / claims-api)
 - `INTEGRATION_PROVIDER=live`: real Jira/ADO HTTP adapters with timeouts and bounded retries
+
+## URL policy
+
+Live credential URLs must be HTTPS endpoints on allowed hosts (`*.atlassian.net`, `dev.azure.com`, `*.visualstudio.com`). Private/link-local IP literals and credentials embedded in URLs are rejected.

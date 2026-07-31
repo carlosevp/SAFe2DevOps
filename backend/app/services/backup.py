@@ -38,17 +38,29 @@ class BackupService:
     def create_backup(self, *, label: str | None = None, method: str = "backup_api") -> BackupInfo:
         paths = self.storage.ensure_directories()
         db_path = self.settings.sqlite_path
-        if db_path is None or not self.settings.database_url or not self.settings.database_url.startswith("sqlite"):
-            raise AppError(code="sqlite_required", message="Backups require a SQLite database", status_code=400)
+        if (
+            db_path is None
+            or not self.settings.database_url
+            or not self.settings.database_url.startswith("sqlite")
+        ):
+            raise AppError(
+                code="sqlite_required", message="Backups require a SQLite database", status_code=400
+            )
         if not db_path.exists():
-            raise AppError(code="database_missing", message="SQLite database file does not exist", status_code=404)
+            raise AppError(
+                code="database_missing",
+                message="SQLite database file does not exist",
+                status_code=404,
+            )
 
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         safe_label = SAFE_NAME_RE.sub("_", (label or "manual").strip())[:40] or "manual"
         filename = f"safedevops-{stamp}-{safe_label}.db"
         target = paths.backups / filename
         if target.exists():
-            raise AppError(code="backup_exists", message="Backup filename already exists", status_code=409)
+            raise AppError(
+                code="backup_exists", message="Backup filename already exists", status_code=409
+            )
 
         if method == "vacuum_into":
             self._vacuum_into(db_path, target)
@@ -58,7 +70,11 @@ class BackupService:
         integrity = self.verify_integrity(target)
         if not integrity:
             target.unlink(missing_ok=True)
-            raise AppError(code="backup_corrupt", message="Backup failed integrity check and was discarded", status_code=500)
+            raise AppError(
+                code="backup_corrupt",
+                message="Backup failed integrity check and was discarded",
+                status_code=500,
+            )
 
         return BackupInfo(
             name=filename,
@@ -87,7 +103,9 @@ class BackupService:
         if not path.is_absolute():
             path = self.storage.paths().backups / path.name
         if not path.is_file():
-            raise AppError(code="backup_not_found", message="Backup file not found", status_code=404)
+            raise AppError(
+                code="backup_not_found", message="Backup file not found", status_code=404
+            )
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
             row = conn.execute("PRAGMA integrity_check").fetchone()
@@ -100,13 +118,21 @@ class BackupService:
         paths = self.storage.ensure_directories()
         source = paths.backups / Path(backup_name).name
         if not source.is_file():
-            raise AppError(code="backup_not_found", message="Backup file not found", status_code=404)
+            raise AppError(
+                code="backup_not_found", message="Backup file not found", status_code=404
+            )
         if not self.verify_integrity(source):
-            raise AppError(code="backup_corrupt", message="Backup failed integrity check", status_code=400)
+            raise AppError(
+                code="backup_corrupt", message="Backup failed integrity check", status_code=400
+            )
 
         db_path = self.settings.sqlite_path
         if db_path is None:
-            raise AppError(code="sqlite_required", message="SQLite database path is not configured", status_code=400)
+            raise AppError(
+                code="sqlite_required",
+                message="SQLite database path is not configured",
+                status_code=400,
+            )
 
         # Refuse restore if a writer lock suggests the app is still running.
         wal = Path(str(db_path) + "-wal")
@@ -169,7 +195,12 @@ class BackupService:
         if voice_tmp.is_dir():
             scan_roots.append(voice_tmp)
 
-        protected_roots = {paths.db_dir.resolve(), paths.exports.resolve(), paths.evidence.resolve(), paths.backups.resolve()}
+        protected_roots = {
+            paths.db_dir.resolve(),
+            paths.exports.resolve(),
+            paths.evidence.resolve(),
+            paths.backups.resolve(),
+        }
         for root in scan_roots:
             if not root.exists():
                 continue
@@ -179,7 +210,9 @@ class BackupService:
                 if not path.is_file():
                     continue
                 name = path.name
-                if not any(path.match(glob) or Path(name).match(glob) for glob in TEMP_GLOBS) and not name.startswith(".tmp"):
+                if not any(
+                    path.match(glob) or Path(name).match(glob) for glob in TEMP_GLOBS
+                ) and not name.startswith(".tmp"):
                     # Also clean zero-byte probe leftovers.
                     if name != ".write_probe":
                         skipped += 1
