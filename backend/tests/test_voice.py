@@ -251,24 +251,27 @@ def test_transcribe_file_retries_minimal_then_fallback_model(tmp_path: Path) -> 
                     return FakeResponse(400, {"error": {"message": "Invalid keywords"}})
                 if model == "gpt-transcribe":
                     return FakeResponse(400, {"error": {"message": "Unsupported model"}})
+                if model == "gpt-4o-transcribe":
+                    return FakeResponse(400, {"error": {"message": "Audio file might be corrupted"}})
                 return FakeResponse(200, {"text": " Refined answer "})
 
         with (
             patch.object(service.settings, "openai_api_key", "sk-test"),
             patch("app.services.voice.httpx.Client", FakeClient),
         ):
-            text = service._transcribe_file(
+            text, used_model = service._transcribe_file(
                 path=audio,
                 filename="capture.webm",
-                content_type="audio/webm",
+                content_type="audio/webm;codecs=opus",
                 model="gpt-transcribe",
                 prompt="SAFe DevOps assessment",
                 keywords=["CI/CD", "bad<keyword>"],
                 languages=["en-US"],
             )
         assert text.strip() == "Refined answer"
-        assert len(calls) == 3
-        assert dict(calls[2]).get("model") == "gpt-4o-transcribe"
+        assert used_model == "whisper-1"
+        assert len(calls) == 4
+        assert dict(calls[3]).get("model") == "whisper-1"
     finally:
         db.close()
 
@@ -303,6 +306,7 @@ def test_refine_failure_falls_back_to_live_draft(client: TestClient) -> None:
         assert out.used_live_fallback is True
         assert out.transcript == "Keep this live draft"
         assert out.warning
+        assert "live transcript" in (out.warning or "").lower()
     finally:
         db.close()
 

@@ -39,10 +39,14 @@ describe('voice state machine (two-pass)', () => {
     ctx = reduceMic(ctx, { type: 'PARTIAL', text: 'Live only' })
     ctx = reduceMic(ctx, { type: 'FINISH' })
     ctx = reduceMic(ctx, { type: 'FINISHING_DONE' })
-    ctx = reduceMic(ctx, { type: 'REFINE_FAILED', message: 'upstream failed' })
+    ctx = reduceMic(ctx, {
+      type: 'REFINE_FAILED',
+      message: 'Using the live transcript. The optional accuracy pass was unavailable.',
+    })
     expect(ctx.state).toBe('refinement_failed')
     expect(ctx.finalTranscript).toContain('Live only')
-    expect(ctx.refinementWarning).toMatch(/upstream|retained/i)
+    expect(ctx.refinementWarning).toMatch(/live transcript|accuracy pass/i)
+    expect(ctx.statusLabel).toMatch(/live transcript/i)
   })
 
   it('supports pause/resume and discard', () => {

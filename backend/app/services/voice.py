@@ -85,6 +85,51 @@ def _openai_error_message(body: str) -> str:
     return redact_secrets(text[:240])
 
 
+def _normalize_audio_mime(content_type: str | None) -> str:
+    raw = (content_type or "").split(";")[0].strip().lower()
+    if raw in {"audio/webm", "video/webm"}:
+        return "audio/webm"
+    if raw in {"audio/mp4", "video/mp4", "audio/m4a", "audio/aac", "audio/x-m4a"}:
+        return "audio/mp4"
+    if raw in {"audio/mpeg", "audio/mp3"}:
+        return "audio/mpeg"
+    if raw in {"audio/wav", "audio/x-wav", "audio/wave"}:
+        return "audio/wav"
+    if raw in {"audio/ogg", "application/ogg"}:
+        return "audio/ogg"
+    if raw.startswith("audio/"):
+        return raw
+    return "application/octet-stream"
+
+
+def _sniff_audio_filename(file_bytes: bytes, filename: str, content_type: str | None) -> str:
+    """Prefer a filename extension that matches the container OpenAI will sniff."""
+    name = Path(filename or "capture.webm").name
+    stem = Path(name).stem or "capture"
+    head = file_bytes[:16]
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return f"{stem}.webm"
+    if len(file_bytes) >= 12 and file_bytes[4:8] == b"ftyp":
+        return f"{stem}.m4a"
+    if head.startswith(b"RIFF") and file_bytes[8:12] == b"WAVE":
+        return f"{stem}.wav"
+    if head.startswith(b"OggS"):
+        return f"{stem}.ogg"
+    if head.startswith(b"ID3") or head[:2] == b"\xff\xfb":
+        return f"{stem}.mp3"
+    mime = _normalize_audio_mime(content_type)
+    ext = {
+        "audio/webm": ".webm",
+        "audio/mp4": ".m4a",
+        "audio/mpeg": ".mp3",
+        "audio/wav": ".wav",
+        "audio/ogg": ".ogg",
+    }.get(mime)
+    if ext:
+        return f"{stem}{ext}"
+    return name if "." in name else f"{stem}.webm"
+
+
 class VoiceService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -339,28 +384,33 @@ class VoiceService:
         path: Path | None = None
         retained = bool(row.retain_source_audio)
         started = time.perf_counter()
+        safe_name = _sniff_audio_filename(file_bytes, filename or "capture.webm", content_type)
+        mime = _normalize_audio_mime(content_type)
+        soft_fallback = (
+            "Using the live transcript. The optional accuracy pass was unavailable — "
+            "edit if needed, then submit."
+        )
         try:
             audio_id, path = self._store_upload_bytes(
                 file_bytes,
-                filename=filename or "capture.webm",
+                filename=safe_name,
                 assessment_id=assessment_id,
                 retained=retained,
             )
-            use_mock = (
-                self.settings.interview_provider == "mock"
-                or row.interview_provider == "mock"
-                or not self.settings.openai_api_key
-            )
+            # Final refine should use OpenAI whenever a key is present, even if the
+            # interview analysis provider is still in mock mode.
+            use_mock = not bool(self.settings.openai_api_key)
             model = row.final_transcription_model or DEFAULT_FINAL_MODEL
             if use_mock:
                 text = live_transcript.strip() or (
                     "Mock refined transcript: pipeline runs unit tests on every pull request."
                 )
+                used_model = model
             else:
-                text = self._transcribe_file(
+                text, used_model = self._transcribe_file(
                     path=path,
-                    filename=filename or "capture.webm",
-                    content_type=content_type,
+                    filename=safe_name,
+                    content_type=mime,
                     model=model,
                     prompt=ctx.prompt,
                     keywords=ctx.keywords,
@@ -374,20 +424,25 @@ class VoiceService:
                 actor_type="admin",
                 actor_subject=actor,
                 details={
-                    "model": model,
+                    "model": used_model,
                     "duration_ms": duration_ms,
                     "audio_bytes": len(file_bytes),
                     "retained": retained,
                     "keyword_count": len(ctx.keywords),
+                    "filename": safe_name,
+                    "content_type": mime,
                 },
             )
             if not retained and audio_id:
-                self.cleanup_temp_audio(audio_id, force=True)
-                audio_id = None
+                try:
+                    self.cleanup_temp_audio(audio_id, force=True)
+                    audio_id = None
+                except Exception:  # noqa: BLE001
+                    logger.warning("voice temp audio cleanup failed after successful refine")
             self.db.flush()
             return RefineTranscriptOut(
                 transcript=text.strip(),
-                model=model,
+                model=used_model,
                 used_live_fallback=False,
                 audio_id=audio_id,
                 retained=retained,
@@ -398,35 +453,43 @@ class VoiceService:
             if audio_id and not retained:
                 try:
                     self.cleanup_temp_audio(audio_id, force=True)
-                except AppError:
+                except Exception:  # noqa: BLE001
                     pass
             self.record_metrics(
                 VoiceMetricsIn(refinement_failed=True, final_model=row.final_transcription_model)
             )
-            logger.warning("voice refine failed code=%s", exc.code)
+            logger.warning(
+                "voice refine failed code=%s detail=%s",
+                exc.code,
+                redact_secrets((exc.message or "")[:240]),
+            )
             return RefineTranscriptOut(
                 transcript=live_transcript,
                 model=row.final_transcription_model or DEFAULT_FINAL_MODEL,
                 used_live_fallback=True,
                 refined=False,
-                warning=exc.message or "Final transcription failed. Live draft retained.",
+                warning=soft_fallback,
             )
         except Exception as exc:  # noqa: BLE001
             if audio_id and not retained:
                 try:
                     self.cleanup_temp_audio(audio_id, force=True)
-                except AppError:
+                except Exception:  # noqa: BLE001
                     pass
             self.record_metrics(
                 VoiceMetricsIn(refinement_failed=True, final_model=row.final_transcription_model)
             )
-            logger.warning("voice refine error type=%s", type(exc).__name__)
+            logger.warning(
+                "voice refine error type=%s detail=%s",
+                type(exc).__name__,
+                redact_secrets(str(exc)[:240]),
+            )
             return RefineTranscriptOut(
                 transcript=live_transcript,
                 model=row.final_transcription_model or DEFAULT_FINAL_MODEL,
                 used_live_fallback=True,
                 refined=False,
-                warning="Final transcription failed. Live draft retained.",
+                warning=soft_fallback,
             )
 
     def _store_upload_bytes(
@@ -486,7 +549,8 @@ class VoiceService:
         prompt: str,
         keywords: list[str],
         languages: list[str],
-    ) -> str:
+    ) -> tuple[str, str]:
+        """Return (transcript_text, model_used)."""
         api_key = self.settings.openai_api_key
         if not api_key:
             raise AppError(
@@ -495,74 +559,93 @@ class VoiceService:
                 status_code=503,
             )
 
-        attempts: list[tuple[str, list[tuple[str, str]]]] = []
+        attempts: list[tuple[str, str, list[tuple[str, str]]]] = []
         clean_keywords = sanitize_keywords(keywords)[:40]
         langs = [str(x).split("-")[0].lower() for x in languages if str(x).strip()][:6] or ["en"]
         short_prompt = (prompt or "").strip()[:900]
+        primary = model or DEFAULT_FINAL_MODEL
 
-        if model == "gpt-transcribe":
-            rich: list[tuple[str, str]] = [("model", model), ("response_format", "json")]
+        def add(label: str, model_name: str, fields: list[tuple[str, str]]) -> None:
+            attempts.append((label, model_name, fields))
+
+        if primary == "gpt-transcribe":
+            rich: list[tuple[str, str]] = [("model", primary)]
             if short_prompt:
                 rich.append(("prompt", short_prompt))
             for lang in langs:
                 rich.append(("languages", lang))
             for kw in clean_keywords:
                 rich.append(("keywords", kw))
-            attempts.append(("gpt-transcribe+context", rich))
-            attempts.append(
-                ("gpt-transcribe+minimal", [("model", model), ("response_format", "json")])
-            )
-            # Fallback if the account/model snapshot rejects gpt-transcribe fields.
+            add("gpt-transcribe+context", primary, rich)
+            add("gpt-transcribe+minimal", primary, [("model", primary)])
             legacy: list[tuple[str, str]] = [
                 ("model", "gpt-4o-transcribe"),
-                ("response_format", "json"),
                 ("language", langs[0]),
             ]
             if short_prompt:
                 legacy.append(("prompt", short_prompt))
-            attempts.append(("gpt-4o-transcribe+context", legacy))
+            add("gpt-4o-transcribe+context", "gpt-4o-transcribe", legacy)
         else:
-            form: list[tuple[str, str]] = [("model", model), ("response_format", "json")]
+            form: list[tuple[str, str]] = [("model", primary)]
             if langs:
                 form.append(("language", langs[0]))
             if short_prompt:
                 form.append(("prompt", short_prompt))
-            attempts.append((f"{model}+context", form))
-            attempts.append((f"{model}+minimal", [("model", model), ("response_format", "json")]))
+            add(f"{primary}+context", primary, form)
+            add(f"{primary}+minimal", primary, [("model", primary)])
 
-        mime = content_type or "application/octet-stream"
+        # Widely available last resort when newer models reject the container.
+        add("whisper-1+minimal", "whisper-1", [("model", "whisper-1"), ("response_format", "json")])
+
+        mime = _normalize_audio_mime(content_type)
         last_detail = ""
-        with httpx.Client(timeout=120.0) as client:
-            for label, form_data in attempts:
-                with path.open("rb") as handle:
-                    response = client.post(
-                        OPENAI_AUDIO_TRANSCRIPTIONS_URL,
-                        headers={"Authorization": f"Bearer {api_key}"},
-                        data=form_data,
-                        files={"file": (filename or path.name, handle, mime)},
-                    )
-                if response.status_code >= 400:
-                    last_detail = _openai_error_message(response.text)
-                    logger.warning(
-                        "audio transcriptions failed attempt=%s status=%s body=%s",
-                        label,
-                        response.status_code,
-                        redact_secrets(response.text[:400]),
-                    )
-                    continue
-                try:
-                    payload = response.json()
-                    text = payload.get("text") if isinstance(payload, dict) else None
-                    if isinstance(text, str) and text.strip():
-                        logger.info("audio transcriptions succeeded attempt=%s", label)
-                        return text
-                except Exception:  # noqa: BLE001
-                    pass
-                body = response.text.strip()
-                if body and not body.startswith("{"):
-                    logger.info("audio transcriptions succeeded attempt=%s text_body", label)
-                    return body
-                last_detail = "Final transcription returned empty text"
+        try:
+            with httpx.Client(timeout=120.0) as client:
+                for label, model_name, form_data in attempts:
+                    try:
+                        with path.open("rb") as handle:
+                            response = client.post(
+                                OPENAI_AUDIO_TRANSCRIPTIONS_URL,
+                                headers={"Authorization": f"Bearer {api_key}"},
+                                data=form_data,
+                                files={"file": (filename or path.name, handle, mime)},
+                            )
+                    except httpx.HTTPError as exc:
+                        last_detail = f"Transcription request failed ({type(exc).__name__})"
+                        logger.warning(
+                            "audio transcriptions transport error attempt=%s type=%s",
+                            label,
+                            type(exc).__name__,
+                        )
+                        continue
+                    if response.status_code >= 400:
+                        last_detail = _openai_error_message(response.text)
+                        logger.warning(
+                            "audio transcriptions failed attempt=%s status=%s body=%s",
+                            label,
+                            response.status_code,
+                            redact_secrets(response.text[:400]),
+                        )
+                        continue
+                    try:
+                        payload = response.json()
+                        text = payload.get("text") if isinstance(payload, dict) else None
+                        if isinstance(text, str) and text.strip():
+                            logger.info("audio transcriptions succeeded attempt=%s", label)
+                            return text, model_name
+                        last_detail = "Final transcription returned empty text"
+                    except Exception:  # noqa: BLE001
+                        body = response.text.strip()
+                        if body and not body.startswith("{"):
+                            logger.info("audio transcriptions succeeded attempt=%s text_body", label)
+                            return body, model_name
+                        last_detail = "Final transcription returned empty text"
+        except Exception as exc:  # noqa: BLE001
+            raise AppError(
+                code="final_transcription_failed",
+                message=f"Transcription request failed ({type(exc).__name__})",
+                status_code=502,
+            ) from exc
 
         raise AppError(
             code="final_transcription_failed",

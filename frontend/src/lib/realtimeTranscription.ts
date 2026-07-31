@@ -69,17 +69,25 @@ const MOCK_SCRIPT =
   'Alex: After merge, CI deploys to staging and we manually promote to production while watching dashboards.'
 
 function preferredRecorderMime(): string {
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-    'audio/ogg;codecs=opus',
-  ]
+  // Prefer mp4/m4a on Apple browsers — OpenAI accepts it reliably. Chrome still
+  // uses webm/opus when that is the only supported recorder type.
+  const apple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|Safari/i.test(navigator.userAgent) && !/Chrom(e|ium)|Android/i.test(navigator.userAgent)
+  const candidates = apple
+    ? ['audio/mp4', 'audio/aac', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
+    : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
   if (typeof MediaRecorder === 'undefined') return 'audio/webm'
   for (const type of candidates) {
     if (MediaRecorder.isTypeSupported(type)) return type
   }
   return ''
+}
+
+function recorderFilename(mimeType: string): string {
+  const mime = (mimeType || '').toLowerCase()
+  if (mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')) return 'capture.m4a'
+  if (mime.includes('ogg')) return 'capture.ogg'
+  if (mime.includes('wav')) return 'capture.wav'
+  return 'capture.webm'
 }
 
 function mediaErrorMessage(err: unknown): string {
@@ -449,7 +457,7 @@ export class RealtimeTranscriptionController {
     try {
       const result = await refineVoiceTranscript({
         blob,
-        filename: this.session.mimeType.includes('mp4') ? 'capture.mp4' : 'capture.webm',
+        filename: recorderFilename(this.session.mimeType),
         assessmentId: this.assessmentId,
         liveTranscript: liveDraft,
       })
@@ -462,7 +470,9 @@ export class RealtimeTranscriptionController {
         this.refinedFinal = liveDraft
         this.dispatch({
           type: 'REFINE_FAILED',
-          message: result.warning || 'Refinement failed — live draft retained.',
+          message:
+            result.warning ||
+            'Using the live transcript. The optional accuracy pass was unavailable — edit if needed, then submit.',
         })
         // Keep blob in memory for Retry refinement.
       }
@@ -483,7 +493,8 @@ export class RealtimeTranscriptionController {
       this.refinedFinal = liveDraft
       this.dispatch({
         type: 'REFINE_FAILED',
-        message: 'Refinement failed — live draft retained. You can edit or retry.',
+        message:
+          'Using the live transcript. The optional accuracy pass was unavailable — edit if needed, then submit.',
       })
       void reportVoiceMetrics({
         refinement_failed: true,
@@ -520,13 +531,16 @@ export class RealtimeTranscriptionController {
       } else {
         this.dispatch({
           type: 'REFINE_FAILED',
-          message: result.warning || 'Refinement failed — live draft retained.',
+          message:
+            result.warning ||
+            'Using the live transcript. The optional accuracy pass was unavailable — edit if needed, then submit.',
         })
       }
     } catch {
       this.dispatch({
         type: 'REFINE_FAILED',
-        message: 'Refinement failed — live draft retained.',
+        message:
+          'Using the live transcript. The optional accuracy pass was unavailable — edit if needed, then submit.',
       })
     }
   }
@@ -594,16 +608,21 @@ export class RealtimeTranscriptionController {
     if (typeof MediaRecorder === 'undefined') return
     const mimeType = preferredRecorderMime()
     try {
+      // Clone so WebRTC teardown cannot corrupt the accuracy-pass recording.
+      const recordStream = stream.clone()
       const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream)
+        ? new MediaRecorder(recordStream, { mimeType })
+        : new MediaRecorder(recordStream)
       this.session.mimeType = recorder.mimeType || mimeType || 'audio/webm'
       this.session.chunks = []
       recorder.ondataavailable = event => {
         if (event.data && event.data.size > 0) this.session.chunks.push(event.data)
       }
-      recorder.start(1000)
+      recorder.start(250)
       this.session.recorder = recorder
+      recorder.addEventListener('stop', () => {
+        for (const track of recordStream.getTracks()) track.stop()
+      })
     } catch (err) {
       reportClientFailure('media_recorder', err)
       this.session.recorder = null

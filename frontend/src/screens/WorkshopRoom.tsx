@@ -880,7 +880,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                   <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)' }}>
                     {micCtx.state === 'finishing'
                       ? 'Freezing the live draft…'
-                      : 'Refining transcript for accuracy. The live draft is preserved if refinement fails.'}
+                      : 'Running an optional accuracy pass on the recording. Your live draft is kept if that pass is unavailable.'}
                   </p>
                   <textarea
                     value={answerText}
@@ -893,7 +893,12 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
 
               {(micCtx.state === 'ready_to_edit' || micCtx.state === 'refinement_failed' || micCtx.state === 'fallback_text' || micCtx.state === 'error' || (!voiceEnabled && micCtx.state === 'idle')) && (
                 <div>
-                  {(micCtx.state === 'fallback_text' || micCtx.state === 'error' || micCtx.state === 'refinement_failed') && (micCtx.errorMessage || micCtx.refinementWarning) && (
+                  {micCtx.state === 'refinement_failed' && (micCtx.refinementWarning || micCtx.errorMessage) && (
+                    <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)' }}>
+                      {micCtx.refinementWarning || micCtx.errorMessage}
+                    </p>
+                  )}
+                  {(micCtx.state === 'fallback_text' || micCtx.state === 'error') && (micCtx.errorMessage || micCtx.refinementWarning) && (
                     <p className="text-sm mb-3" style={{ color: '#d97706' }}>
                       {micCtx.refinementWarning || micCtx.errorMessage}
                     </p>
@@ -935,7 +940,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                           style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
                         >
                           <RotateCcw size={12} />
-                          Retry refinement
+                          Retry accuracy pass
                         </button>
                       )}
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Autosaves as you type</span>

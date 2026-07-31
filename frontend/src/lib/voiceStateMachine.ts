@@ -61,9 +61,9 @@ const LABELS: Record<MicState, string> = {
   paused: 'Paused',
   live_draft: 'Live draft',
   finishing: 'Finishing recording',
-  refining: 'Refining transcript',
+  refining: 'Optional accuracy pass',
   ready_to_edit: 'Transcript ready',
-  refinement_failed: 'Refinement failed — live draft retained',
+  refinement_failed: 'Using live transcript',
   reconnecting: 'Disconnected',
   disconnected: 'Disconnected',
   permission_denied: 'Permission denied',
@@ -214,7 +214,8 @@ export function reduceMic(ctx: MicContext, event: MicEvent): MicContext {
           state: 'refinement_failed',
           finalTranscript: fallback,
           refinementWarning:
-            event.message || 'Refinement failed — live draft retained. You can edit or retry.',
+            event.message ||
+            'Using the live transcript. The optional accuracy pass was unavailable — edit if needed, then submit.',
         })
       }
       return ctx
