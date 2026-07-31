@@ -34,10 +34,14 @@ ALLOWED_TRANSITIONS: dict[AssessmentStatus, set[AssessmentStatus]] = {
     },
     AssessmentStatus.ADMIN_REVIEW: {
         AssessmentStatus.PUBLISHED,
+        AssessmentStatus.INTERVIEW_ACTIVE,
         AssessmentStatus.INTERVIEW_COMPLETE,
         AssessmentStatus.ARCHIVED,
     },
-    AssessmentStatus.PUBLISHED: {AssessmentStatus.ARCHIVED},
+    AssessmentStatus.PUBLISHED: {
+        AssessmentStatus.ADMIN_REVIEW,  # corrections create a new published version
+        AssessmentStatus.ARCHIVED,
+    },
     AssessmentStatus.ARCHIVED: set(),
 }
 

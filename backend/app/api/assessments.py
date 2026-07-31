@@ -19,12 +19,10 @@ from app.schemas.assessment import (
     LifecycleTransitionRequest,
     PracticeCoverageAdmin,
     PracticeCoverageParticipant,
-    PublishedReportOut,
 )
 from app.services.assessment import AssessmentService
 from app.services.evidence import EvidenceService
 from app.services.lifecycle import LifecycleService
-from app.services.publication import PublicationService
 
 router = APIRouter(prefix="/assessments", tags=["assessments"])
 
@@ -271,22 +269,4 @@ def update_admin_score(
     )
 
 
-@router.post("/{assessment_id}/publish", response_model=PublishedReportOut)
-def publish_assessment(
-    assessment_id: str,
-    admin: dict[str, str] = Depends(require_admin),
-    db: Session = Depends(get_db_session),
-) -> PublishedReportOut:
-    report = PublicationService(db).publish(assessment_id, published_by=admin.get("subject", "admin"))
-    db.commit()
-    return PublishedReportOut(
-        id=report.id,
-        assessment_id=report.assessment_id,
-        version=report.version,
-        title=report.title,
-        summary_markdown=report.summary_markdown,
-        scores=json.loads(report.scores_json),
-        published_by=report.published_by,
-        published_at=report.published_at,
-        immutable=True,
-    )
+# Publish endpoint lives on the review router so approve → publish stays cohesive.

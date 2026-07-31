@@ -84,6 +84,7 @@ class DomainConfig(StrictModel):
     name: str = Field(min_length=1, max_length=120)
     short_name: str = Field(min_length=1, max_length=16)
     order: int = Field(ge=0)
+    weight: float = Field(default=1.0, ge=0.0, le=10.0)
     description: str = Field(min_length=1, max_length=1000)
     practices: list[PracticeConfig] = Field(min_length=1)
 

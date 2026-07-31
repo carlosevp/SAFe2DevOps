@@ -84,6 +84,7 @@ domains:
   name: Continuous Exploration
   short_name: CE
   order: 10
+  weight: 1.0
   description: 'SAFe DevOps domain: Continuous Exploration.'
   practices:
   - key: hypothesize
@@ -300,6 +301,7 @@ domains:
   name: Continuous Integration
   short_name: CI
   order: 20
+  weight: 1.0
   description: 'SAFe DevOps domain: Continuous Integration.'
   practices:
   - key: develop
@@ -519,6 +521,7 @@ domains:
   name: Continuous Deployment
   short_name: CD
   order: 30
+  weight: 1.0
   description: 'SAFe DevOps domain: Continuous Deployment.'
   practices:
   - key: deploy
@@ -713,6 +716,7 @@ domains:
   name: Release on Demand
   short_name: RoD
   order: 40
+  weight: 1.0
   description: 'SAFe DevOps domain: Release on Demand.'
   practices:
   - key: release

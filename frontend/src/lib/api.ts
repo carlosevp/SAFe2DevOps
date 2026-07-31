@@ -550,3 +550,160 @@ export async function submitRemoteContribution(input: {
     confirmation_message: string
   }
 }
+
+export type ReviewPractice = {
+  practice_key: string
+  practice_name: string
+  domain_key: string
+  domain_short_name: string
+  coverage_state: string
+  ai_candidate_score: number | null
+  named_maturity_level: string | null
+  confidence: number | null
+  human_evidence: string
+  jira_evidence: string
+  ado_evidence: string
+  source_turn_ids: string[]
+  contradictions: string[]
+  limitations: string[]
+  scoring_rationale: string
+  missing_information: string[]
+  admin_final_score: number | null
+  admin_rationale: string | null
+  evidence_unreliable: boolean
+  admin_observation: string | null
+  recommendation_text: string | null
+}
+
+export type ImprovementAction = {
+  id: string
+  title: string
+  practice_key: string | null
+  domain_key: string | null
+  observation: string
+  supporting_evidence: string
+  why_it_matters: string
+  recommended_action: string
+  time_horizon: string
+  kpi: string
+  priority: number
+}
+
+export type ReviewPackage = {
+  assessment_id: string
+  team_name: string
+  product_service_name: string
+  status: string
+  lookback_days: number
+  evidence_influence_mode: string
+  overall_maturity: number | null
+  confidence_summary: string | null
+  evidence_quality: string | null
+  strengths: string[]
+  maturity_gaps: string[]
+  evidence_limitations: string[]
+  practices: ReviewPractice[]
+  improvement_actions: ImprovementAction[]
+  radar: { domain_key: string; domain_short_name: string; domain_name: string; score: number; weight: number }[]
+  heatmap: { practice_key: string; practice_name: string; domain_short_name: string; score: number | null; named_maturity_level?: string | null }[]
+  chart_summary: string
+  ready_to_publish: boolean
+  ai_vs_final: { practice_key: string; ai_candidate_score: number | null; admin_final_score: number | null; admin_rationale?: string | null }[]
+}
+
+export type PublishedResults = {
+  assessment_id: string
+  version: number
+  title: string
+  team_name: string
+  product_service_name: string
+  published_at: string
+  lookback_days: number
+  evidence_influence_mode: string
+  overall_maturity: number
+  confidence_summary: string
+  evidence_quality: string
+  practices_assessed: number
+  practices_total: number
+  strengths: string[]
+  maturity_gaps: string[]
+  evidence_limitations: string[]
+  radar: ReviewPackage['radar']
+  heatmap: ReviewPackage['heatmap']
+  improvement_actions: ImprovementAction[]
+  chart_summary: string
+  scores: Record<string, number>
+}
+
+export function startReview(assessmentId: string) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review/start`, { method: 'POST' })
+}
+
+export function getReview(assessmentId: string) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review`)
+}
+
+export function setReviewScore(
+  assessmentId: string,
+  practiceKey: string,
+  body: { score?: number; rationale?: string; accept_candidate?: boolean },
+) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review/practices/${practiceKey}/score`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export function markEvidenceUnreliable(assessmentId: string, practiceKey: string, unreliable = true, note?: string) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review/practices/${practiceKey}/unreliable`, {
+    method: 'POST',
+    body: JSON.stringify({ unreliable, note }),
+  })
+}
+
+export function addReviewObservation(assessmentId: string, practiceKey: string, observation: string) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review/practices/${practiceKey}/observation`, {
+    method: 'POST',
+    body: JSON.stringify({ observation }),
+  })
+}
+
+export function editRecommendation(assessmentId: string, practiceKey: string, recommendation_text: string) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review/practices/${practiceKey}/recommendation`, {
+    method: 'PUT',
+    body: JSON.stringify({ recommendation_text }),
+  })
+}
+
+export function reopenReviewTopic(assessmentId: string, practiceKey: string) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review/practices/${practiceKey}/reopen`, {
+    method: 'POST',
+  })
+}
+
+export function editImprovement(assessmentId: string, actionId: string, body: Partial<ImprovementAction>) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review/improvements/${actionId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export function approveReview(assessmentId: string) {
+  return apiFetch<ReviewPackage>(`/api/assessments/${assessmentId}/review/approve`, { method: 'POST' })
+}
+
+export function publishAssessment(assessmentId: string) {
+  return apiFetch<{ id: string; assessment_id: string; version: number; title: string; immutable: boolean }>(
+    `/api/assessments/${assessmentId}/publish`,
+    { method: 'POST' },
+  )
+}
+
+export function getPublishedResults(assessmentId: string, version?: number) {
+  const q = version != null ? `?version=${version}` : ''
+  return apiFetch<PublishedResults>(`/api/assessments/${assessmentId}/results${q}`)
+}
+
+export function exportReportUrl(assessmentId: string, version: number, kind: 'pdf' | 'json') {
+  return `${API_BASE}/api/assessments/${assessmentId}/results/${version}/export/${kind}`
+}

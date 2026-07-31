@@ -130,6 +130,8 @@ def test_score_secrecy_and_rationale(client: TestClient, admin_password: str, db
 
 
 def test_published_version_immutability(db: Session) -> None:
+    from app.services.review import ReviewService
+
     assessment = SeedService(db).seed_demo()
     # Ensure every practice has a score for publication.
     for coverage in assessment.practice_coverages:
@@ -137,6 +139,11 @@ def test_published_version_immutability(db: Session) -> None:
             coverage.ai_candidate_score = 2.0
             coverage.admin_final_score = 2.0
             coverage.admin_rationale = "Seeded for publish"
+        elif coverage.admin_final_score is None:
+            coverage.admin_final_score = coverage.ai_candidate_score
+    db.flush()
+
+    ReviewService(db).approve(assessment.id, actor="admin")
     db.flush()
 
     pub = PublicationService(db)
@@ -144,6 +151,8 @@ def test_published_version_immutability(db: Session) -> None:
     assert report.version == 1
     assert report.immutable is True
     assert assessment.status == AssessmentStatus.PUBLISHED.value
+    assert report.export_json_relpath
+    assert report.export_pdf_relpath
 
     with pytest.raises(AppError) as exc:
         pub.update_report(report.id, title="mutated")
@@ -151,3 +160,9 @@ def test_published_version_immutability(db: Session) -> None:
 
     scores = json.loads(report.scores_json)
     assert "ai_candidate_score" not in json.dumps(scores)
+
+    # Corrections create a new version via admin_review → publish.
+    LifecycleService(db).transition(assessment, AssessmentStatus.ADMIN_REVIEW, actor_subject="admin")
+    ReviewService(db).approve(assessment.id, actor="admin")
+    report2 = pub.publish(assessment.id, published_by="admin")
+    assert report2.version == 2

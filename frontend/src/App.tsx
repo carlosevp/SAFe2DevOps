@@ -93,10 +93,10 @@ export default function App() {
         </div>
       )}
       {screen === 'admin-review' && (
-        <AdminReview dark={dark} onNavigate={setScreen} />
+        <AdminReview dark={dark} onNavigate={setScreen} assessmentId={assessmentId} />
       )}
       {screen === 'results' && (
-        <Results dark={dark} onNavigate={setScreen} />
+        <Results dark={dark} onNavigate={setScreen} assessmentId={assessmentId} />
       )}
       {screen === 'ai-settings' && (
         <AISettings dark={dark} onNavigate={setScreen} />

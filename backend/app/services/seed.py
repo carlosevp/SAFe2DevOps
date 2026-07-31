@@ -179,8 +179,15 @@ class SeedService:
             ImprovementAction(
                 assessment_id=assessment.id,
                 practice_key="test_end_to_end",
+                domain_key="continuous_integration",
                 title="Add end-to-end regression suite to PR validation",
                 detail="Require claims-api-PR-validation to run a smoke E2E pack before merge.",
+                observation="E2E validation is inconsistent across pull requests.",
+                supporting_evidence="Pipeline success rate and PR check gaps from Azure DevOps.",
+                why_it_matters="Ungated merges allow known failures to accumulate in main.",
+                recommended_action="Require claims-api-PR-validation to run a smoke E2E pack before merge.",
+                time_horizon="next_sprint",
+                kpi="% of PRs completing required E2E checks before merge",
                 priority=1,
                 owner_hint="QA + platform",
             )
