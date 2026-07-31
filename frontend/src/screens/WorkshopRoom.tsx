@@ -55,11 +55,14 @@ const coverageLabel: Record<CoverageState, string> = {
   partial: 'Partially covered',
   sufficient: 'Sufficiently covered',
   clarify: 'Needs clarification',
+  insufficient: 'Poor coverage',
 }
 
 function toUiCoverage(state: string): CoverageState {
   if (state === 'not_discussed') return 'not-discussed'
-  if (state === 'partial' || state === 'sufficient' || state === 'clarify') return state
+  if (state === 'partial' || state === 'sufficient' || state === 'clarify' || state === 'insufficient') {
+    return state
+  }
   return 'not-discussed'
 }
 
@@ -244,6 +247,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
   const practices = session?.practices || []
   const suffCount = practices.filter(p => p.coverage_state === 'sufficient').length
   const partCount = practices.filter(p => p.coverage_state === 'partial').length
+  const poorCount = practices.filter(p => p.coverage_state === 'insufficient').length
   const notCount = practices.filter(p => p.coverage_state === 'not_discussed').length
   const coveragePct = Math.round((suffCount / Math.max(practices.length, 16)) * 100)
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
@@ -526,6 +530,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                   {[
                     { label: 'Sufficient', count: suffCount, color: '#10b981' },
                     { label: 'Partial', count: partCount, color: '#f59e0b' },
+                    { label: 'Poor', count: poorCount, color: '#94a3b8' },
                     { label: 'Not discussed', count: notCount, color: dark ? '#334155' : '#cbd5e1' },
                   ].map(s => (
                     <div key={s.label} className="flex items-center justify-between py-1">
@@ -551,6 +556,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                                 background: cov === 'sufficient' ? '#10b981'
                                   : cov === 'partial' ? '#f59e0b'
                                   : cov === 'clarify' ? '#f97316'
+                                  : cov === 'insufficient' ? '#94a3b8'
                                   : dark ? '#334155' : '#cbd5e1',
                               }}
                             />
@@ -1026,6 +1032,13 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                     <div className="w-2 h-2 rounded-full" style={{ background: '#f59e0b' }} />
                     <span style={{ color: dark ? '#e8edf5' : '#0f172a' }}>{label}</span>
                     <span className="text-xs" style={{ color: '#f59e0b' }}>· partially covered</span>
+                  </div>
+                ))}
+                {(lastResult?.insufficient_practices || []).map(label => (
+                  <div key={`i-${label}`} className="flex items-center gap-2 text-sm">
+                    <div className="w-2 h-2 rounded-full" style={{ background: '#94a3b8' }} />
+                    <span style={{ color: dark ? '#e8edf5' : '#0f172a' }}>{label}</span>
+                    <span className="text-xs" style={{ color: '#64748b' }}>· poor coverage — moving on</span>
                   </div>
                 ))}
               </div>

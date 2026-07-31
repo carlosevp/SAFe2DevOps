@@ -113,6 +113,7 @@ class TurnSubmitOut(StrictSchema):
     covered_practices: list[str] = Field(default_factory=list)
     partial_practices: list[str] = Field(default_factory=list)
     clarify_practices: list[str] = Field(default_factory=list)
+    insufficient_practices: list[str] = Field(default_factory=list)
     duplicated: bool = False
 
 
@@ -124,6 +125,7 @@ class CheckpointOut(StrictSchema):
     partial_count: int
     not_discussed_count: int
     clarify_count: int
+    insufficient_count: int = 0
     covered: list[dict[str, str]] = Field(default_factory=list)
     remaining: list[dict[str, str]] = Field(default_factory=list)
     completion_eligible: bool

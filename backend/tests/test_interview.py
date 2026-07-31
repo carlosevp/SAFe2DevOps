@@ -150,6 +150,71 @@ def test_structured_output_parsing_and_unknown_practice_rejection() -> None:
     assert exc.value.code == "unknown_practice_key"
 
 
+def test_weak_answers_exhaust_practice_without_repeating_question(client: TestClient) -> None:
+    from app.assessment_config import get_assessment_model_config
+    from app.core.db import get_session_factory
+    from app.models.enums import CoverageState
+    from app.services.interview import InterviewService
+
+    assessment_id = _prepare_assessment(client)
+    assert client.post(f"/api/assessments/{assessment_id}/interview/start").status_code == 200
+
+    factory = get_session_factory()
+    db = factory()
+    try:
+        svc = InterviewService(db)
+        assessment = svc._require(assessment_id)
+        # Force a sticky clarify practice and ask the same seed twice.
+        target = next(c for c in assessment.practice_coverages if c.practice_key == "synthesize")
+        target.coverage_state = CoverageState.CLARIFY.value
+        target.confidence = 0.2
+        db.flush()
+
+        practice = get_assessment_model_config().require_practice("synthesize")
+        seed = practice.clarification_seeds[0].text
+        asked = [seed]
+        first = svc._ensure_novel_question(seed, asked=asked, practice_key="synthesize")
+        assert svc._normalize_question(first) != svc._normalize_question(seed)
+
+        # After max probes, practice becomes insufficient and is skipped.
+        max_probes = svc.model.stop_criteria.max_clarification_rounds_per_practice
+        for _ in range(max_probes):
+            svc._create_system_turn(
+                assessment,
+                question_text=seed,
+                turn_type=__import__("app.models.enums", fromlist=["InterviewTurnType"]).InterviewTurnType.FOLLOW_UP,
+                idempotency_key=f"probe-{_}-{assessment_id}",
+                practice_keys=["synthesize"],
+            )
+        assert svc._practice_probe_count(assessment_id, "synthesize") >= max_probes
+        from app.schemas.interview import InterviewAnalysisAI
+
+        analysis = InterviewAnalysisAI(
+            response_summary="Weak answers only.",
+            claims=[],
+            source_attribution=[],
+            practice_updates=[],
+            evidence_summary="",
+            confidence=0.2,
+            open_gaps=[],
+            contradictions=[],
+            needs_immediate_clarification=False,
+            clarification_question=None,
+            next_best_question="How do pull requests get reviewed before merge?",
+            reason_for_next_question="Move on after poor coverage.",
+            completion_recommendation="continue",
+            overall_coverage_summary="Continuing.",
+        )
+        nxt = svc._select_next_question(assessment, analysis)
+        assert "synthesize" not in (nxt.get("practice_keys_list") or [])
+        assert assessment.practice_coverages
+        synth = next(c for c in assessment.practice_coverages if c.practice_key == "synthesize")
+        assert synth.coverage_state == CoverageState.INSUFFICIENT.value
+        db.commit()
+    finally:
+        db.close()
+
+
 def test_multi_practice_coverage_and_clarification(client: TestClient) -> None:
     assessment_id = _prepare_assessment(client)
     assert client.post(f"/api/assessments/{assessment_id}/interview/start").status_code == 200

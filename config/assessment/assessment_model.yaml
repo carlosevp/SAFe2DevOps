@@ -32,6 +32,7 @@ required_evaluation_dimensions: &id001
 minimum_confidence: 0.55
 stop_criteria:
   min_practices_with_sufficient_coverage: 12
+  # After this many probes on one practice, mark it insufficient (poor) and move on.
   max_clarification_rounds_per_practice: 2
   max_interview_turns: 40
   min_overall_confidence: 0.55

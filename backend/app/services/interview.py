@@ -254,15 +254,57 @@ class InterviewService:
             )
         confirmation = self._coverage_confirmation(analysis)
 
-        # Clarification rounds cap
+        # Cap probes per practice: after a few weak answers, mark poor and move on.
+        exhausted_keys: list[str] = []
         if analysis.needs_immediate_clarification and analysis.clarification_question:
             for update in analysis.practice_updates:
-                if update.coverage_state == CoverageState.CLARIFY:
-                    rounds = self._clarification_rounds(assessment_id, update.practice_key)
-                    if rounds >= self.model.stop_criteria.max_clarification_rounds_per_practice:
-                        analysis.needs_immediate_clarification = False
-                        analysis.clarification_question = None
-                        break
+                if update.coverage_state != CoverageState.CLARIFY:
+                    continue
+                probes = self._practice_probe_count(assessment_id, update.practice_key)
+                max_probes = self.model.stop_criteria.max_clarification_rounds_per_practice
+                if probes >= max_probes:
+                    coverage = next(
+                        (
+                            c
+                            for c in assessment.practice_coverages
+                            if c.practice_key == update.practice_key
+                        ),
+                        None,
+                    )
+                    if coverage is not None:
+                        self._mark_practice_insufficient(
+                            coverage,
+                            reason=(
+                                "Limited evidence after probing; marked as poor coverage "
+                                "so the interview can move on."
+                            ),
+                        )
+                        exhausted_keys.append(update.practice_key)
+                    analysis.needs_immediate_clarification = False
+                    analysis.clarification_question = None
+            # Refresh confirmation if we exhausted anything.
+            if exhausted_keys:
+                confirmation = (
+                    "We captured what we could on "
+                    + ", ".join(self._practice_name(k) for k in exhausted_keys)
+                    + " and marked it as poor coverage so we can continue."
+                )
+
+        # Avoid repeating the same clarification wording back-to-back.
+        if analysis.needs_immediate_clarification and analysis.clarification_question:
+            asked = self._recent_question_texts(assessment_id)
+            analysis.clarification_question = self._ensure_novel_question(
+                analysis.clarification_question,
+                asked=asked,
+                practice_key=next(
+                    (
+                        u.practice_key
+                        for u in analysis.practice_updates
+                        if u.coverage_state == CoverageState.CLARIFY
+                    ),
+                    None,
+                ),
+            )
 
         session.answered_turn_count += 1
         session.draft_answer_text = ""
@@ -287,6 +329,7 @@ class InterviewService:
                     u.practice_key
                     for u in analysis.practice_updates
                     if u.coverage_state == CoverageState.CLARIFY
+                    and u.practice_key not in exhausted_keys
                 ),
                 None,
             )
@@ -319,6 +362,7 @@ class InterviewService:
                 question_text=session.current_question,
                 turn_type=InterviewTurnType.FOLLOW_UP,
                 idempotency_key=f"next:{assessment_id}:{session.answered_turn_count}",
+                practice_keys=next_q.get("practice_keys_list") or [],
             )
 
         self.audit.record(
@@ -353,7 +397,25 @@ class InterviewService:
             self._practice_name(u.practice_key)
             for u in analysis.practice_updates
             if u.coverage_state == CoverageState.CLARIFY
+            and u.practice_key not in exhausted_keys
         ]
+        insufficient = [
+            self._practice_name(k) for k in exhausted_keys
+        ] + [
+            self._practice_name(c.practice_key)
+            for c in assessment.practice_coverages
+            if c.coverage_state == CoverageState.INSUFFICIENT.value
+            and c.practice_key
+            in {u.practice_key for u in analysis.practice_updates}
+            and c.practice_key not in exhausted_keys
+        ]
+        # De-dupe names while preserving order.
+        seen_poor: set[str] = set()
+        poor_names: list[str] = []
+        for name in insufficient:
+            if name not in seen_poor:
+                seen_poor.add(name)
+                poor_names.append(name)
         return TurnSubmitOut(
             session=self.get_session(assessment_id),
             analysis_summary=analysis.response_summary,
@@ -361,6 +423,7 @@ class InterviewService:
             covered_practices=covered,
             partial_practices=partial,
             clarify_practices=clarify,
+            insufficient_practices=poor_names,
             duplicated=False,
         )
 
@@ -500,6 +563,7 @@ class InterviewService:
         partial = [p for p in practices if p.coverage_state == CoverageState.PARTIAL]
         not_discussed = [p for p in practices if p.coverage_state == CoverageState.NOT_DISCUSSED]
         clarify = [p for p in practices if p.coverage_state == CoverageState.CLARIFY]
+        insufficient = [p for p in practices if p.coverage_state == CoverageState.INSUFFICIENT]
         eligible, blockers = self.compute_completion_eligibility(assessment)
         remaining = partial + clarify + not_discussed
         return CheckpointOut(
@@ -509,12 +573,14 @@ class InterviewService:
             else "Good progress — several delivery topics still need discussion.",
             summary=(
                 f"{len(sufficient)} of 16 practices sufficiently covered · "
-                f"{len(partial)} partially covered · {len(not_discussed)} not yet discussed"
+                f"{len(partial)} partially covered · {len(insufficient)} poor coverage · "
+                f"{len(not_discussed)} not yet discussed"
             ),
             sufficient_count=len(sufficient),
             partial_count=len(partial),
             not_discussed_count=len(not_discussed),
             clarify_count=len(clarify),
+            insufficient_count=len(insufficient),
             covered=[{"label": p.practice_name, "domain": p.domain_short_name} for p in sufficient],
             remaining=[
                 {
@@ -709,11 +775,18 @@ class InterviewService:
             coverage = by_key.get(update.practice_key)
             if coverage is None:
                 continue
-            # Monotonic-ish: don't regress sufficient to not_discussed.
+            # Monotonic-ish: don't regress sufficient/insufficient incorrectly.
             current = CoverageState(coverage.coverage_state)
             incoming = update.coverage_state
             if current == CoverageState.SUFFICIENT and incoming == CoverageState.NOT_DISCUSSED:
                 incoming = CoverageState.SUFFICIENT
+            if current == CoverageState.INSUFFICIENT and incoming in {
+                CoverageState.NOT_DISCUSSED,
+                CoverageState.CLARIFY,
+                CoverageState.PARTIAL,
+            }:
+                # Stay on poor coverage unless the model later marks sufficient.
+                incoming = CoverageState.INSUFFICIENT
             coverage.coverage_state = incoming.value
             coverage.confidence = update.confidence
             # Candidate scores stored for admin review only — never exposed in interview APIs.
@@ -771,57 +844,92 @@ class InterviewService:
         reason: str,
         evidence: str | None = None,
         extra_practices: list[PracticeConfig] | None = None,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
+        assessment_id = getattr(assessment, "id", None)
+        asked = self._recent_question_texts(assessment_id)
+        novel = self._ensure_novel_question(question, asked=asked, practice_key=practice.key)
         return {
-            "question": question,
+            "question": novel,
             "why": self._why_with_practice_context(
                 practice, domain, reason, extra_practices=extra_practices
             ),
             "evidence": evidence if evidence is not None else self._evidence_blurb(assessment),
             "topic": f"{domain.short_name} · {practice.name}",
+            "practice_keys_list": [practice.key]
+            + [p.key for p in (extra_practices or []) if p.key != practice.key],
         }
 
     def _select_next_question(
         self, assessment: Assessment, analysis: InterviewAnalysisAI
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Server-side next-best question selection; AI suggestion is advisory only.
 
         Optimizes for hidden SAFe practice coverage and applicable enterprise-standard
         coverage together. Prefers multi-coverage questions; never runs a separate
-        enterprise questionnaire.
+        enterprise questionnaire. Never re-asks exhausted (insufficient) practices.
         """
         coverages = {c.practice_key: c for c in assessment.practice_coverages}
-        # Priority 1: clarify states (immediate ambiguity)
+        max_probes = self.model.stop_criteria.max_clarification_rounds_per_practice
+
+        # Priority 1: clarify states — exhaust after a few probes instead of looping.
         for domain, practice in self.model.ordered_practices():
             cov = coverages.get(practice.key)
-            if cov and cov.coverage_state == CoverageState.CLARIFY.value:
-                seed = (
-                    practice.clarification_seeds[0].text
-                    if practice.clarification_seeds
-                    else analysis.next_best_question
+            if not cov or cov.coverage_state != CoverageState.CLARIFY.value:
+                continue
+            if self._practice_probe_count(assessment.id, practice.key) >= max_probes:
+                self._mark_practice_insufficient(
+                    cov,
+                    reason=(
+                        "Limited evidence after probing; marked as poor coverage "
+                        "so the interview can move on."
+                    ),
                 )
-                return self._practice_question_payload(
-                    assessment,
-                    practice,
-                    domain,
-                    question=seed,
-                    reason="We need clarity on this area before coverage can advance.",
-                )
+                continue
+            seed = self._pick_seed_text(
+                practice,
+                kind="clarification",
+                asked=self._recent_question_texts(assessment.id),
+                fallback=analysis.next_best_question,
+            )
+            return self._practice_question_payload(
+                assessment,
+                practice,
+                domain,
+                question=seed,
+                reason="We need clarity on this area before coverage can advance.",
+            )
         # Priority 2: multi-coverage SAFe + enterprise (prefer simultaneous gathering)
         multi_q = self._select_multi_coverage_question(assessment, analysis)
         if multi_q is not None:
             return multi_q
         # Priority 3: contradictions
         for cov in assessment.practice_coverages:
+            if cov.coverage_state == CoverageState.INSUFFICIENT.value:
+                continue
             contras = json.loads(cov.contradictions_json or "[]")
             if contras:
                 practice = self.model.require_practice(cov.practice_key)
                 domain = next(d for d, p in self.model.ordered_practices() if p.key == practice.key)
+                if self._practice_probe_count(assessment.id, practice.key) >= max_probes:
+                    self._mark_practice_insufficient(
+                        cov,
+                        reason=(
+                            "Limited evidence after probing; marked as poor coverage "
+                            "so the interview can move on."
+                        ),
+                    )
+                    continue
+                seed = self._pick_seed_text(
+                    practice,
+                    kind="clarification",
+                    asked=self._recent_question_texts(assessment.id),
+                    fallback=analysis.next_best_question,
+                )
                 return self._practice_question_payload(
                     assessment,
                     practice,
                     domain,
-                    question=practice.clarification_seeds[0].text,
+                    question=seed,
                     reason="There is a tension between what the team said and observed tool evidence.",
                     evidence=contras[0],
                 )
@@ -834,14 +942,29 @@ class InterviewService:
             ],
             key=lambda c: c.confidence or 0.0,
         )
-        if low:
-            practice = self.model.require_practice(low[0].practice_key)
+        for cov in low:
+            practice = self.model.require_practice(cov.practice_key)
             domain = next(d for d, p in self.model.ordered_practices() if p.key == practice.key)
+            if self._practice_probe_count(assessment.id, practice.key) >= max_probes:
+                self._mark_practice_insufficient(
+                    cov,
+                    reason=(
+                        "Limited evidence after probing; marked as poor coverage "
+                        "so the interview can move on."
+                    ),
+                )
+                continue
+            seed = self._pick_seed_text(
+                practice,
+                kind="question",
+                asked=self._recent_question_texts(assessment.id),
+                fallback=analysis.next_best_question,
+            )
             return self._practice_question_payload(
                 assessment,
                 practice,
                 domain,
-                question=practice.question_seeds[0].text,
+                question=seed,
                 reason="This area was only partially covered and still has open gaps.",
             )
         # Priority 5: uncovered + domain balance
@@ -855,29 +978,46 @@ class InterviewService:
             if domain.key not in touched_domains:
                 cov = coverages.get(practice.key)
                 if cov and cov.coverage_state == CoverageState.NOT_DISCUSSED.value:
+                    seed = self._pick_seed_text(
+                        practice,
+                        kind="question",
+                        asked=self._recent_question_texts(assessment.id),
+                        fallback=analysis.next_best_question,
+                    )
                     return self._practice_question_payload(
                         assessment,
                         practice,
                         domain,
-                        question=practice.question_seeds[0].text,
+                        question=seed,
                         reason="Balancing coverage across SAFe DevOps domains.",
                     )
         for domain, practice in ordered:
             cov = coverages.get(practice.key)
             if cov and cov.coverage_state == CoverageState.NOT_DISCUSSED.value:
+                seed = self._pick_seed_text(
+                    practice,
+                    kind="question",
+                    asked=self._recent_question_texts(assessment.id),
+                    fallback=analysis.next_best_question,
+                )
                 return self._practice_question_payload(
                     assessment,
                     practice,
                     domain,
-                    question=practice.question_seeds[0].text,
+                    question=seed,
                     reason=analysis.reason_for_next_question
                     or "Continuing with uncovered delivery practices.",
                 )
+        asked = self._recent_question_texts(assessment.id)
+        fallback_q = self._ensure_novel_question(
+            analysis.next_best_question, asked=asked, practice_key=None
+        )
         return {
-            "question": analysis.next_best_question,
+            "question": fallback_q,
             "why": analysis.reason_for_next_question,
             "evidence": self._evidence_blurb(assessment),
             "topic": "Follow-up",
+            "practice_keys_list": [],
         }
 
     def _build_context(self, assessment: Assessment) -> dict[str, Any]:
@@ -922,7 +1062,7 @@ class InterviewService:
 
     def _select_multi_coverage_question(
         self, assessment: Assessment, analysis: InterviewAnalysisAI
-    ) -> dict[str, str] | None:
+    ) -> dict[str, Any] | None:
         """Prefer questions that advance several SAFe practices and open standards together.
 
         Host-facing copy stays neutral: no standard titles, statuses, or finding language.
@@ -954,6 +1094,7 @@ class InterviewService:
                 CoverageState.PARTIAL.value,
                 CoverageState.CLARIFY.value,
             }
+            # insufficient / poor coverage is intentionally skipped
         }
         if not open_practice_keys:
             return None
@@ -1300,6 +1441,7 @@ class InterviewService:
         question_text: str,
         turn_type: InterviewTurnType,
         idempotency_key: str,
+        practice_keys: list[str] | None = None,
     ) -> InterviewTurn | None:
         existing = self.db.scalar(
             select(InterviewTurn).where(
@@ -1316,7 +1458,7 @@ class InterviewService:
             source=InterviewTurnSource.SYSTEM.value,
             question_text=question_text,
             answer_text=None,
-            practice_keys_json="[]",
+            practice_keys_json=json.dumps(practice_keys or []),
             idempotency_key=idempotency_key,
             content_trust="system",
         )
@@ -1333,19 +1475,140 @@ class InterviewService:
         )
         return int(current or 0) + 1
 
-    def _clarification_rounds(self, assessment_id: str, practice_key: str) -> int:
+    @staticmethod
+    def _normalize_question(text: str) -> str:
+        return " ".join((text or "").lower().split())
+
+    def _recent_question_texts(self, assessment_id: str | None, *, limit: int = 16) -> list[str]:
+        if not assessment_id or not hasattr(self, "db") or self.db is None:
+            return []
+        session = self.db.scalar(
+            select(InterviewSession).where(InterviewSession.assessment_id == assessment_id)
+        )
+        texts: list[str] = []
+        if session:
+            if session.pending_clarification:
+                texts.append(session.pending_clarification)
+            if session.current_question:
+                texts.append(session.current_question)
         turns = self.db.scalars(
-            select(InterviewTurn).where(
-                InterviewTurn.assessment_id == assessment_id,
-                InterviewTurn.turn_type == InterviewTurnType.CLARIFICATION.value,
-            )
+            select(InterviewTurn)
+            .where(InterviewTurn.assessment_id == assessment_id)
+            .order_by(InterviewTurn.sequence.desc())
+            .limit(limit)
+        ).all()
+        for turn in turns:
+            if turn.question_text:
+                texts.append(turn.question_text)
+        # Preserve order, drop empties/dupes by normalized form.
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for text in texts:
+            norm = self._normalize_question(text)
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            ordered.append(text)
+        return ordered
+
+    def _practice_probe_count(self, assessment_id: str, practice_key: str) -> int:
+        """Count how many times we have already probed this practice."""
+        try:
+            practice = self.model.require_practice(practice_key)
+        except ValueError:
+            practice = None
+        seed_norms = set()
+        if practice is not None:
+            for seed in list(practice.question_seeds) + list(practice.clarification_seeds):
+                seed_norms.add(self._normalize_question(seed.text))
+        turns = self.db.scalars(
+            select(InterviewTurn).where(InterviewTurn.assessment_id == assessment_id)
         ).all()
         count = 0
         for turn in turns:
             keys = json.loads(turn.practice_keys_json or "[]")
+            qnorm = self._normalize_question(turn.question_text or "")
             if practice_key in keys:
                 count += 1
+                continue
+            if qnorm and qnorm in seed_norms:
+                count += 1
         return count
+
+    def _mark_practice_insufficient(self, coverage: Any, *, reason: str) -> None:
+        coverage.coverage_state = CoverageState.INSUFFICIENT.value
+        coverage.confidence = min(float(coverage.confidence or 0.3), 0.35)
+        if coverage.ai_candidate_score is None or float(coverage.ai_candidate_score) > 2.0:
+            coverage.ai_candidate_score = 1.5
+        gaps = json.loads(coverage.open_gaps_json or "[]")
+        if reason not in gaps:
+            gaps.append(reason)
+        coverage.open_gaps_json = json.dumps(gaps[-20:])
+        self.db.flush()
+
+    def _pick_seed_text(
+        self,
+        practice: PracticeConfig,
+        *,
+        kind: str,
+        asked: list[str],
+        fallback: str,
+    ) -> str:
+        asked_norms = {self._normalize_question(x) for x in asked}
+        seeds = (
+            list(practice.clarification_seeds)
+            if kind == "clarification"
+            else list(practice.question_seeds)
+        )
+        for seed in seeds:
+            if self._normalize_question(seed.text) not in asked_norms:
+                return seed.text
+        # Prefer the model's suggested next question if it is novel.
+        if fallback and self._normalize_question(fallback) not in asked_norms:
+            return fallback
+        if seeds:
+            return self._reword_question(seeds[0].text, asked_norms)
+        return self._reword_question(fallback or f"Tell us more about {practice.name}.", asked_norms)
+
+    def _reword_question(self, base: str, asked_norms: set[str]) -> str:
+        cleaned = (base or "").strip() or "Can you share a concrete recent example for this area?"
+        variants = [
+            cleaned,
+            f"Using one recent example — {cleaned[0].lower() + cleaned[1:] if cleaned else cleaned}",
+            f"In more concrete terms: {cleaned}",
+            f"{cleaned.rstrip('?')} — who was involved and what tools were used?",
+            f"What specifically gets in the way here? {cleaned}",
+        ]
+        for variant in variants:
+            if self._normalize_question(variant) not in asked_norms:
+                return variant
+        return f"{cleaned} Please give a short concrete example."
+
+    def _ensure_novel_question(
+        self,
+        question: str,
+        *,
+        asked: list[str],
+        practice_key: str | None,
+    ) -> str:
+        text = (question or "").strip()
+        asked_norms = {self._normalize_question(x) for x in asked}
+        if text and self._normalize_question(text) not in asked_norms:
+            return text
+        fallback = text or "Can you walk through one concrete recent example for this topic?"
+        if practice_key:
+            try:
+                practice = self.model.require_practice(practice_key)
+                return self._pick_seed_text(
+                    practice, kind="question", asked=asked, fallback=fallback
+                )
+            except ValueError:
+                pass
+        return self._reword_question(fallback, asked_norms)
+
+    def _clarification_rounds(self, assessment_id: str, practice_key: str) -> int:
+        """Backward-compatible alias — prefer _practice_probe_count for new logic."""
+        return self._practice_probe_count(assessment_id, practice_key)
 
     def _get_or_create_session(self, assessment_id: str) -> InterviewSession:
         session = self.db.scalar(

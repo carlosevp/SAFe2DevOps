@@ -11,7 +11,7 @@ export type Screen =
   | 'ai-settings'
   | 'enterprise-standards'
 
-export type CoverageState = 'not-discussed' | 'partial' | 'sufficient' | 'clarify'
+export type CoverageState = 'not-discussed' | 'partial' | 'sufficient' | 'clarify' | 'insufficient'
 
 export interface Practice {
   id: string

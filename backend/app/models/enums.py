@@ -38,6 +38,8 @@ class CoverageState(StrEnum):
     PARTIAL = "partial"
     SUFFICIENT = "sufficient"
     CLARIFY = "clarify"
+    # Probed a few times without usable evidence — move on; treat as poor coverage.
+    INSUFFICIENT = "insufficient"
 
 
 class InterviewTurnType(StrEnum):

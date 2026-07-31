@@ -262,6 +262,7 @@ export type TurnSubmitResult = {
   covered_practices: string[]
   partial_practices: string[]
   clarify_practices: string[]
+  insufficient_practices?: string[]
   duplicated: boolean
 }
 
