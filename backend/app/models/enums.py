@@ -52,6 +52,7 @@ class InterviewTurnSource(StrEnum):
     ROOM_VOICE = "room_voice"
     ROOM_TYPED = "room_typed"
     REMOTE_TYPED = "remote_typed"
+    REMOTE_CONTRIBUTION = "remote_contribution"
     FACILITATOR = "facilitator"
     SYSTEM = "system"
 
@@ -60,7 +61,8 @@ class RemoteContributionStatus(StrEnum):
     PENDING = "pending"
     INCLUDED = "included"
     DEFERRED = "deferred"
-    REJECTED = "rejected"
+    DISMISSED = "dismissed"
+    REJECTED = "rejected"  # legacy alias for dismissed
 
 
 class AuditActorType(StrEnum):

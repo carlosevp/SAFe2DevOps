@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Send, ChevronDown, ChevronUp, MessageSquare, CheckCircle2, AlertCircle, Coffee, Save, Users, Inbox,
-  Mic, Pause, RotateCcw, Square, Clock,
+  Mic, Pause, RotateCcw, Square, Clock, Link2, Copy, Ban, Paperclip, X,
 } from 'lucide-react'
 import {
   getInterview,
@@ -12,12 +12,19 @@ import {
   submitInterviewTurn,
   completeInterview,
   getAiSettings,
+  getRemoteSettings,
+  updateRemoteSettings,
+  createRemoteInvite,
+  revokeRemoteInvite,
+  listRemoteContributions,
+  disposeRemoteContribution,
   type InterviewSession,
   type TurnSubmitResult,
+  type RemoteContribution,
+  type RemoteInvite,
 } from '../lib/api'
 import { RealtimeTranscriptionController } from '../lib/realtimeTranscription'
 import { createMicContext, type MicContext } from '../lib/voiceStateMachine'
-import { REMOTE_CONTRIBUTIONS } from '../data/sampleData'
 import type { Screen, CoverageState } from '../types'
 
 interface Props {
@@ -60,7 +67,14 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   const [lastResult, setLastResult] = useState<TurnSubmitResult | null>(null)
   const [showWhy, setShowWhy] = useState(false)
   const [showInbox, setShowInbox] = useState(false)
-  const [inboxItems] = useState(REMOTE_CONTRIBUTIONS)
+  const [inboxItems, setInboxItems] = useState<RemoteContribution[]>([])
+  const [pendingCount, setPendingCount] = useState(0)
+  const [remoteEnabled, setRemoteEnabled] = useState(false)
+  const [activeInvite, setActiveInvite] = useState<RemoteInvite | null>(null)
+  const [inviteBusy, setInviteBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [selectedContribution, setSelectedContribution] = useState<RemoteContribution | null>(null)
+  const [remoteNotice, setRemoteNotice] = useState<string | null>(null)
   const [coverageExpanded, setCoverageExpanded] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -74,6 +88,22 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   const lastIdempotency = useRef<string | null>(null)
   const voiceRef = useRef<RealtimeTranscriptionController | null>(null)
 
+  const refreshRemote = useCallback(async () => {
+    if (!assessmentId) return
+    try {
+      const [settings, inbox] = await Promise.all([
+        getRemoteSettings(assessmentId),
+        listRemoteContributions(assessmentId),
+      ])
+      setRemoteEnabled(settings.remote_participation_enabled)
+      setActiveInvite(settings.active_invite)
+      setPendingCount(settings.pending_count || inbox.pending_count)
+      setInboxItems(inbox.items)
+    } catch {
+      // Non-fatal for workshop load.
+    }
+  }, [assessmentId])
+
   useEffect(() => {
     getAiSettings()
       .then(settings => {
@@ -84,6 +114,15 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
       })
       .catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    if (!assessmentId) return
+    void refreshRemote()
+    const timer = setInterval(() => {
+      void refreshRemote()
+    }, 8000)
+    return () => clearInterval(timer)
+  }, [assessmentId, refreshRemote])
 
   useEffect(() => {
     const controller = new RealtimeTranscriptionController({
@@ -244,6 +283,95 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
     }
   }
 
+  async function handleToggleRemote(enabled: boolean) {
+    if (!assessmentId) return
+    setInviteBusy(true)
+    try {
+      const settings = await updateRemoteSettings(assessmentId, enabled)
+      setRemoteEnabled(settings.remote_participation_enabled)
+      setActiveInvite(settings.active_invite)
+      if (!enabled) setActiveInvite(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update remote settings')
+    } finally {
+      setInviteBusy(false)
+    }
+  }
+
+  async function handleCreateInvite() {
+    if (!assessmentId) return
+    setInviteBusy(true)
+    try {
+      if (!remoteEnabled) {
+        await updateRemoteSettings(assessmentId, true)
+        setRemoteEnabled(true)
+      }
+      const invite = await createRemoteInvite(assessmentId)
+      setActiveInvite(invite)
+      setRemoteNotice('Invite link created. Copy and share it with remote contributors.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create invite')
+    } finally {
+      setInviteBusy(false)
+    }
+  }
+
+  async function handleCopyInvite() {
+    if (!activeInvite?.invite_url) return
+    try {
+      await navigator.clipboard.writeText(activeInvite.invite_url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch {
+      setError('Unable to copy invite link')
+    }
+  }
+
+  async function handleRevokeInvite() {
+    if (!assessmentId || !activeInvite) return
+    setInviteBusy(true)
+    try {
+      await revokeRemoteInvite(assessmentId, activeInvite.jti)
+      setActiveInvite(null)
+      setRemoteNotice('Invite link revoked.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to revoke invite')
+    } finally {
+      setInviteBusy(false)
+    }
+  }
+
+  async function handleDisposition(id: string, action: 'include' | 'defer' | 'dismiss') {
+    if (!assessmentId) return
+    try {
+      const result = await disposeRemoteContribution(assessmentId, id, action)
+      setRemoteNotice(result.notification || `Contribution ${action}d.`)
+      if (action === 'include') {
+        // Refresh coverage without advancing the host question.
+        const data = await getInterview(assessmentId)
+        const previousQuestion = session?.current_question
+        setSession(data)
+        if (previousQuestion && data.current_question !== previousQuestion) {
+          setError('Host question unexpectedly changed after include')
+        }
+      }
+      setSelectedContribution(null)
+      await refreshRemote()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update contribution')
+    }
+  }
+
+  function formatRelative(ts: string) {
+    const then = new Date(ts).getTime()
+    if (Number.isNaN(then)) return ts
+    const mins = Math.max(0, Math.round((Date.now() - then) / 60000))
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`
+    const hours = Math.round(mins / 60)
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--background)', color: 'var(--muted-foreground)' }}>
@@ -291,6 +419,14 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
           >
             <Inbox size={13} />
             <span>Contributions</span>
+            {pendingCount > 0 && (
+              <span
+                className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+                style={{ background: '#dc2626', color: '#fff' }}
+              >
+                {pendingCount}
+              </span>
+            )}
           </button>
           <button
             onClick={() => void handleSaveExit()}
@@ -715,13 +851,105 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
                 <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--muted-foreground)' }}>Contributions</p>
                 <button onClick={() => setShowInbox(false)} className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Close</button>
               </div>
-              <div className="space-y-3">
+
+              <div className="rounded-lg p-3 mb-3 space-y-2" style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium" style={{ color: 'var(--foreground)' }}>Remote participation</span>
+                  <button
+                    disabled={inviteBusy}
+                    onClick={() => void handleToggleRemote(!remoteEnabled)}
+                    className="text-[11px] px-2 py-1 rounded"
+                    style={{
+                      background: remoteEnabled ? (dark ? '#0f2a1c' : '#d1fae5') : 'var(--card)',
+                      color: remoteEnabled ? (dark ? '#4ade80' : '#065f46') : 'var(--muted-foreground)',
+                      border: `1px solid ${cardBorder}`,
+                    }}
+                  >
+                    {remoteEnabled ? 'Enabled' : 'Disabled'}
+                  </button>
+                </div>
+                {remoteEnabled && (
+                  <>
+                    {activeInvite ? (
+                      <div className="space-y-2">
+                        <p className="text-[11px] break-all" style={{ color: 'var(--muted-foreground)', lineHeight: 1.45 }}>
+                          {activeInvite.invite_url}
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            onClick={() => void handleCopyInvite()}
+                            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded"
+                            style={{ background: 'var(--primary)', color: '#fff' }}
+                          >
+                            <Copy size={11} />
+                            {copied ? 'Copied' : 'Copy link'}
+                          </button>
+                          <button
+                            disabled={inviteBusy}
+                            onClick={() => void handleRevokeInvite()}
+                            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded"
+                            style={{ background: 'var(--card)', color: 'var(--muted-foreground)', border: `1px solid ${cardBorder}` }}
+                          >
+                            <Ban size={11} />
+                            Revoke
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        disabled={inviteBusy}
+                        onClick={() => void handleCreateInvite()}
+                        className="flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded w-full justify-center"
+                        style={{ background: 'var(--primary)', color: '#fff' }}
+                      >
+                        <Link2 size={12} />
+                        Create invite link
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {remoteNotice && (
+                <div className="mb-3 text-[11px] rounded-lg px-2.5 py-2" style={{ background: dark ? '#0f2a1c' : '#ecfdf5', color: dark ? '#4ade80' : '#065f46', lineHeight: 1.45 }}>
+                  {remoteNotice}
+                </div>
+              )}
+
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                {inboxItems.length === 0 && (
+                  <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>No remote contributions yet.</p>
+                )}
                 {inboxItems.map(item => (
                   <div key={item.id} className="rounded-lg p-3" style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>{item.name}</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>{item.contributor_name}</span>
+                      <span className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>{formatRelative(item.timestamp)}</span>
                     </div>
-                    <p className="text-xs" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>{item.preview.slice(0, 90)}…</p>
+                    <p className="text-[11px] font-medium mb-1" style={{ color: 'var(--primary)' }}>{item.topic}</p>
+                    <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>
+                      {item.preview}
+                      {item.has_attachment && (
+                        <span className="inline-flex items-center gap-1 ml-1" style={{ color: 'var(--foreground)' }}>
+                          <Paperclip size={10} />
+                        </span>
+                      )}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {item.status === 'pending' && (
+                        <>
+                          <button onClick={() => void handleDisposition(item.id, 'include')} className="text-[11px] px-2 py-1 rounded" style={{ background: dark ? '#0f2a1c' : '#d1fae5', color: dark ? '#4ade80' : '#065f46' }}>Include</button>
+                          <button onClick={() => void handleDisposition(item.id, 'defer')} className="text-[11px] px-2 py-1 rounded" style={{ background: 'var(--card)', color: 'var(--muted-foreground)', border: `1px solid ${cardBorder}` }}>Defer</button>
+                          <button onClick={() => void handleDisposition(item.id, 'dismiss')} className="text-[11px] px-2 py-1 rounded" style={{ background: 'var(--card)', color: 'var(--muted-foreground)', border: `1px solid ${cardBorder}` }}>Dismiss</button>
+                        </>
+                      )}
+                      <button onClick={() => setSelectedContribution(item)} className="text-[11px] px-2 py-1 rounded" style={{ background: 'var(--card)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}>
+                        Open
+                      </button>
+                    </div>
+                    {item.status !== 'pending' && (
+                      <p className="text-[10px] mt-1.5 uppercase tracking-wide" style={{ color: 'var(--muted-foreground)' }}>{item.status}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -745,17 +973,61 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
                 )
               })}
               <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${cardBorder}` }}>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 mb-2">
                   <MessageSquare size={13} style={{ color: 'var(--muted-foreground)' }} />
-                  <button onClick={() => onNavigate('remote-contributor')} className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  <button onClick={() => setShowInbox(true)} className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                     Invite remote contributor
                   </button>
                 </div>
+                {pendingCount > 0 && (
+                  <p className="text-[11px]" style={{ color: 'var(--primary)' }}>{pendingCount} pending contribution{pendingCount === 1 ? '' : 's'}</p>
+                )}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {selectedContribution && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 py-6" style={{ background: 'rgba(15,23,42,0.45)' }}>
+          <div className="w-full max-w-lg rounded-2xl p-5" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}`, maxHeight: '85vh', overflowY: 'auto' }}>
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{selectedContribution.contributor_name}</p>
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  {selectedContribution.contributor_email || 'No email'} · {formatRelative(selectedContribution.timestamp)}
+                </p>
+              </div>
+              <button onClick={() => setSelectedContribution(null)} style={{ color: 'var(--muted-foreground)' }}>
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--primary)' }}>{selectedContribution.topic}</p>
+            <p className="text-sm mb-3" style={{ color: 'var(--foreground)', lineHeight: 1.6 }}>{selectedContribution.question_text}</p>
+            <div className="rounded-lg p-3 mb-3" style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}>
+              <p className="text-sm" style={{ color: 'var(--foreground)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{selectedContribution.body}</p>
+            </div>
+            {selectedContribution.has_attachment && (
+              <p className="text-xs mb-3 flex items-center gap-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                <Paperclip size={12} />
+                {selectedContribution.attachment_filename || 'Attachment'}
+              </p>
+            )}
+            {selectedContribution.affected_practices.length > 0 && (
+              <p className="text-xs mb-3" style={{ color: 'var(--muted-foreground)' }}>
+                Practices affected: {selectedContribution.affected_practices.join(', ')}
+              </p>
+            )}
+            {selectedContribution.status === 'pending' && (
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => void handleDisposition(selectedContribution.id, 'include')} className="text-xs px-3 py-2 rounded-lg font-medium" style={{ background: 'var(--primary)', color: '#fff' }}>Include</button>
+                <button onClick={() => void handleDisposition(selectedContribution.id, 'defer')} className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}>Defer</button>
+                <button onClick={() => void handleDisposition(selectedContribution.id, 'dismiss')} className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}>Dismiss</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

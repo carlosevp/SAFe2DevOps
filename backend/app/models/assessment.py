@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from app.models.evidence import EvidenceSnapshot
     from app.models.interview import InterviewTurn
     from app.models.practice import PracticeCoverage
-    from app.models.remote import RemoteContributor
+    from app.models.remote import RemoteContributor, RemoteInvite
     from app.models.review import AssessmentReview, ImprovementAction, PublishedReport
 
 
@@ -37,6 +37,7 @@ class Assessment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=AssessmentStatus.SETUP.value)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    remote_participation_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     source_selection: Mapped[AssessmentSourceSelection | None] = relationship(
         back_populates="assessment", uselist=False, cascade="all, delete-orphan"
@@ -48,6 +49,9 @@ class Assessment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="assessment", cascade="all, delete-orphan"
     )
     practice_coverages: Mapped[list[PracticeCoverage]] = relationship(
+        back_populates="assessment", cascade="all, delete-orphan"
+    )
+    remote_invites: Mapped[list[RemoteInvite]] = relationship(
         back_populates="assessment", cascade="all, delete-orphan"
     )
     remote_contributors: Mapped[list[RemoteContributor]] = relationship(

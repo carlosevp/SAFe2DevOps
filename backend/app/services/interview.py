@@ -282,6 +282,120 @@ class InterviewService:
             duplicated=False,
         )
 
+    def ingest_remote_contribution(
+        self,
+        assessment_id: str,
+        *,
+        answer_text: str,
+        question_text: str,
+        idempotency_key: str,
+        actor: str = "admin",
+    ) -> dict[str, Any]:
+        """Analyze a remote contribution without advancing the host interview screen."""
+        assessment = self._require(assessment_id)
+        if AssessmentStatus(assessment.status) != AssessmentStatus.INTERVIEW_ACTIVE:
+            raise AppError(code="interview_not_active", message="Interview is not active", status_code=409)
+
+        existing = self.db.scalar(
+            select(InterviewTurn).where(
+                InterviewTurn.assessment_id == assessment_id,
+                InterviewTurn.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            practice_names = [self._practice_name(k) for k in json.loads(existing.practice_keys_json or "[]")]
+            return {
+                "turn_id": existing.id,
+                "affected_practices": practice_names,
+                "duplicated": True,
+                "host_question_unchanged": True,
+            }
+
+        session = self._require_session(assessment_id)
+        # Snapshot host screen so remote inclusion cannot mutate it.
+        frozen_question = session.current_question
+        frozen_why = session.why_asking
+        frozen_evidence = session.evidence_context
+        frozen_topic = session.topic_label
+        frozen_pending = session.pending_clarification
+        frozen_draft = session.draft_answer_text
+        frozen_outcome = session.last_outcome
+
+        clean_answer = sanitize_remote_text(answer_text, max_len=20000).strip()
+        if not clean_answer:
+            raise AppError(code="empty_answer", message="Answer text is required", status_code=400)
+
+        provider = get_interview_provider(self.db, self.settings)
+        context = self._build_context(assessment)
+        context.update(
+            {
+                "answer_text": clean_answer,
+                "is_clarification": False,
+                "pending_clarification": None,
+                "recent_questions": [question_text or frozen_question],
+            }
+        )
+        try:
+            analysis, telemetry = provider.analyze_answer(context)
+        except AppError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise AppError(
+                code="interview_analysis_failed",
+                message="Failed to analyze remote contribution",
+                status_code=502,
+                details={"error_type": type(exc).__name__},
+            ) from exc
+
+        analysis = self._validate_and_sanitize_analysis(analysis)
+        analysis_ref = self._persist_analysis(assessment_id, analysis, telemetry)
+        turn = InterviewTurn(
+            assessment_id=assessment_id,
+            sequence=self._next_sequence(assessment_id),
+            turn_type=InterviewTurnType.BROAD.value,
+            source=InterviewTurnSource.REMOTE_CONTRIBUTION.value,
+            question_text=sanitize_remote_text(question_text or frozen_question, max_len=4000),
+            answer_text=clean_answer,
+            practice_keys_json=json.dumps([u.practice_key for u in analysis.practice_updates]),
+            structured_analysis_ref=analysis_ref,
+            idempotency_key=idempotency_key,
+            content_trust="untrusted",
+        )
+        self.db.add(turn)
+        self.db.flush()
+        self._apply_practice_updates(assessment, analysis, turn_id=turn.id)
+
+        # Restore host screen fields — remote include must not advance the workshop.
+        session.current_question = frozen_question
+        session.why_asking = frozen_why
+        session.evidence_context = frozen_evidence
+        session.topic_label = frozen_topic
+        session.pending_clarification = frozen_pending
+        session.draft_answer_text = frozen_draft
+        session.last_outcome = frozen_outcome
+        session.last_analysis_ref = analysis_ref
+        session.last_telemetry_json = json.dumps(
+            {**telemetry, "prompt_config_version": session.prompt_config_version, "source": "remote_contribution"}
+        )
+        self.db.flush()
+
+        affected = [self._practice_name(u.practice_key) for u in analysis.practice_updates]
+        self.audit.record(
+            assessment_id=assessment_id,
+            event_type="interview.remote_contribution_ingested",
+            message="Remote contribution analyzed without advancing host screen",
+            actor_type="admin",
+            actor_subject=actor,
+            details={"turn_id": turn.id, "practice_keys": [u.practice_key for u in analysis.practice_updates]},
+        )
+        return {
+            "turn_id": turn.id,
+            "affected_practices": affected,
+            "duplicated": False,
+            "host_question_unchanged": True,
+            "analysis_summary": analysis.response_summary,
+        }
+
     def checkpoint(self, assessment_id: str) -> CheckpointOut:
         assessment = self._require(assessment_id)
         practices = self._public_practices(assessment)

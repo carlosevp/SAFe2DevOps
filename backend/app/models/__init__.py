@@ -18,7 +18,7 @@ from app.models.integration import IntegrationConfiguration
 from app.models.ai_settings import AiRuntimeSettings, InterviewSession, VoiceTempAudio
 from app.models.interview import InterviewTurn
 from app.models.practice import PracticeCoverage
-from app.models.remote import RemoteContribution, RemoteContributor
+from app.models.remote import RemoteContribution, RemoteContributor, RemoteInvite
 from app.models.review import AssessmentReview, ImprovementAction, PublishedReport
 
 __all__ = [
@@ -50,5 +50,6 @@ __all__ = [
     "RemoteContribution",
     "RemoteContributionStatus",
     "RemoteContributor",
+    "RemoteInvite",
     "VoiceTempAudio",
 ]

@@ -395,3 +395,158 @@ export function cleanupTempVoiceAudio(audioId: string, force = false) {
     method: 'DELETE',
   })
 }
+
+export type RemoteInvite = {
+  jti: string
+  invite_url: string
+  expires_at: string
+  revoked: boolean
+  created_at?: string | null
+}
+
+export type RemoteSettings = {
+  assessment_id: string
+  remote_participation_enabled: boolean
+  active_invite: RemoteInvite | null
+  pending_count: number
+}
+
+export type RemoteContribution = {
+  id: string
+  contributor_name: string
+  contributor_email: string | null
+  timestamp: string
+  topic: string
+  question_text: string
+  body: string
+  preview: string
+  status: string
+  has_attachment: boolean
+  attachment_filename?: string | null
+  attachment_content_type?: string | null
+  affected_practices: string[]
+  interview_turn_id?: string | null
+}
+
+export type RemoteTopic = {
+  team_name: string
+  assessment_name: string
+  topic_label: string
+  question_text: string
+  evidence_context: string
+  remote_participation_enabled: boolean
+  invite_valid: boolean
+}
+
+export type RemoteJoinResult = {
+  contributor_id: string
+  display_name: string
+  email: string
+  team_name: string
+  assessment_name: string
+  topic_label: string
+  question_text: string
+  evidence_context: string
+}
+
+export function getRemoteSettings(assessmentId: string) {
+  return apiFetch<RemoteSettings>(`/api/assessments/${assessmentId}/remote`)
+}
+
+export function updateRemoteSettings(assessmentId: string, remote_participation_enabled: boolean) {
+  return apiFetch<RemoteSettings>(`/api/assessments/${assessmentId}/remote`, {
+    method: 'PUT',
+    body: JSON.stringify({ remote_participation_enabled }),
+  })
+}
+
+export function createRemoteInvite(assessmentId: string, ttl_seconds?: number) {
+  return apiFetch<RemoteInvite>(`/api/assessments/${assessmentId}/remote/invites`, {
+    method: 'POST',
+    body: JSON.stringify(ttl_seconds ? { ttl_seconds } : {}),
+  })
+}
+
+export function revokeRemoteInvite(assessmentId: string, jti: string) {
+  return apiFetch<RemoteInvite>(`/api/assessments/${assessmentId}/remote/invites/${jti}/revoke`, {
+    method: 'POST',
+  })
+}
+
+export function listRemoteContributions(assessmentId: string, status?: string) {
+  const q = status ? `?status=${encodeURIComponent(status)}` : ''
+  return apiFetch<{ items: RemoteContribution[]; pending_count: number }>(
+    `/api/assessments/${assessmentId}/remote/contributions${q}`,
+  )
+}
+
+export function getRemoteContribution(assessmentId: string, contributionId: string) {
+  return apiFetch<RemoteContribution>(`/api/assessments/${assessmentId}/remote/contributions/${contributionId}`)
+}
+
+export function disposeRemoteContribution(
+  assessmentId: string,
+  contributionId: string,
+  action: 'include' | 'defer' | 'dismiss',
+) {
+  return apiFetch<{
+    contribution: RemoteContribution
+    affected_practices: string[]
+    notification: string | null
+    host_question_unchanged: boolean
+  }>(`/api/assessments/${assessmentId}/remote/contributions/${contributionId}/disposition`, {
+    method: 'POST',
+    body: JSON.stringify({ action }),
+  })
+}
+
+export function getRemoteTopic(token: string) {
+  return apiFetch<RemoteTopic>(`/api/remote/topic?token=${encodeURIComponent(token)}`)
+}
+
+export function joinRemote(token: string, display_name: string, email: string) {
+  return apiFetch<RemoteJoinResult>('/api/remote/join', {
+    method: 'POST',
+    body: JSON.stringify({ token, display_name, email }),
+  })
+}
+
+export async function submitRemoteContribution(input: {
+  token: string
+  contributor_id: string
+  body: string
+  attachment?: File | null
+}) {
+  const form = new FormData()
+  form.append('token', input.token)
+  form.append('contributor_id', input.contributor_id)
+  form.append('body', input.body)
+  if (input.attachment) form.append('attachment', input.attachment)
+
+  const response = await fetch(`${API_BASE}/api/remote/contributions`, {
+    method: 'POST',
+    credentials: 'include',
+    body: form,
+  })
+  const contentType = response.headers.get('content-type') || ''
+  const payload = contentType.includes('application/json') ? await response.json() : await response.text()
+  if (!response.ok) {
+    const error = typeof payload === 'object' && payload && 'error' in payload
+      ? (payload as { error: { code?: string; message?: string; details?: unknown } }).error
+      : undefined
+    throw new ApiError(
+      response.status,
+      error?.code || `http_${response.status}`,
+      error?.message || 'Request failed',
+      error?.details || {},
+    )
+  }
+  return payload as {
+    id: string
+    status: string
+    topic: string
+    preview: string
+    has_attachment: boolean
+    confirmation_message: string
+  }
+}

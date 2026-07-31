@@ -3,11 +3,14 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from urllib.parse import urlparse
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
+
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -50,3 +53,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if self.enable_hsts:
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return response
+
+
+class CsrfOriginMiddleware(BaseHTTPMiddleware):
+    """Reject cross-site cookie-authenticated mutating API calls when Origin is present."""
+
+    SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method in self.SAFE_METHODS or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+
+        # Public remote token endpoints authenticate via signed invite token, not cookies.
+        if request.url.path.startswith("/api/remote/"):
+            return await call_next(request)
+
+        settings = get_settings()
+        cookie_name = settings.session_cookie_name
+        if cookie_name not in request.cookies:
+            return await call_next(request)
+
+        origin = request.headers.get("origin")
+        if not origin:
+            # Same-origin navigations / TestClient often omit Origin; allow.
+            return await call_next(request)
+
+        allowed = set(settings.cors_origin_list)
+        if settings.public_base_url:
+            allowed.add(settings.public_base_url.rstrip("/"))
+        parsed = urlparse(origin)
+        origin_base = f"{parsed.scheme}://{parsed.netloc}"
+        if origin_base not in allowed and origin not in allowed:
+            return JSONResponse(
+                status_code=403,
+                content={"error": {"code": "csrf_origin_rejected", "message": "Request origin is not allowed"}},
+            )
+        return await call_next(request)

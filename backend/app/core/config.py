@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     session_cookie_name: str = "sd_admin_session"
     session_ttl_seconds: int = 60 * 60 * 12
     assessment_token_ttl_seconds: int = 60 * 60 * 24 * 7
+    remote_invite_ttl_seconds: int = 60 * 60 * 24 * 7
+    public_base_url: str = ""
     cors_origins: str = "http://localhost:5173,http://localhost:8443"
     frontend_dist: Path | None = None
     assessment_config_path: Path | None = None

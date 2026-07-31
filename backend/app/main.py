@@ -14,7 +14,7 @@ from app.core.config import get_settings, reset_settings_cache
 from app.core.db import dispose_engine, init_engine
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.core.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
+from app.core.middleware import CsrfOriginMiddleware, RequestIdMiddleware, SecurityHeadersMiddleware
 from app.core.migrations import run_migrations
 from app.services.storage import StorageService
 
@@ -85,6 +85,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(SecurityHeadersMiddleware, enable_hsts=settings.is_production)
+    app.add_middleware(CsrfOriginMiddleware)
     app.add_middleware(RequestIdMiddleware)
 
     register_exception_handlers(app)

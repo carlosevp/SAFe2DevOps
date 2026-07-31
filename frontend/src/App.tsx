@@ -14,8 +14,14 @@ import type { Screen } from './types'
 
 const ASSESSMENT_SCREENS: Screen[] = ['setup', 'evidence', 'workshop', 'checkpoint', 'admin-review', 'results']
 
+function readInviteToken(): string | null {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('invite')
+}
+
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('welcome')
+  const [inviteToken] = useState<string | null>(() => readInviteToken())
+  const [screen, setScreen] = useState<Screen>(() => (readInviteToken() ? 'remote-contributor' : 'welcome'))
   const [dark, setDark] = useState(false)
   const [assessmentId, setAssessmentId] = useState<string | null>(null)
   const [assessmentName, setAssessmentName] = useState('Claims Integration')
@@ -29,13 +35,13 @@ export default function App() {
   }, [dark])
 
   const headerAssessmentName = ASSESSMENT_SCREENS.includes(screen) ? assessmentName : undefined
-  const isRemote = screen === 'remote-contributor'
+  const isRemote = screen === 'remote-contributor' || Boolean(inviteToken)
 
   // Remote contributor has its own minimal layout
   if (isRemote) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--background)', color: 'var(--foreground)' }}>
-        <RemoteContributor dark={dark} />
+        <RemoteContributor dark={dark} inviteToken={inviteToken} />
       </div>
     )
   }
