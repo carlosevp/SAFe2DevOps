@@ -33,7 +33,12 @@ from app.models.evidence import (
     EvidenceSnapshot,
 )
 from app.models.integration import IntegrationConfiguration
-from app.models.ai_settings import AiRuntimeSettings, InterviewSession, VoiceTempAudio
+from app.models.ai_settings import (
+    AiRuntimeSettings,
+    InterviewSession,
+    VoiceDiagnosticsCounters,
+    VoiceTempAudio,
+)
 from app.models.interview import InterviewTurn
 from app.models.practice import PracticeCoverage
 from app.models.remote import RemoteContribution, RemoteContributor, RemoteInvite
@@ -80,5 +85,6 @@ __all__ = [
     "RemoteInvite",
     "RequirementLevel",
     "StandardFindingStatus",
+    "VoiceDiagnosticsCounters",
     "VoiceTempAudio",
 ]

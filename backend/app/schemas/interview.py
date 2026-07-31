@@ -136,11 +136,19 @@ class AiSettingsOut(StrictSchema):
     reasoning_effort: str
     interview_provider: Literal["mock", "live"]
     transcription_model: str
+    live_transcription_model: str = "gpt-live-transcribe"
+    final_transcription_model: str = "gpt-transcribe"
+    live_delay: str = "low"
+    expected_languages: list[str] = Field(default_factory=lambda: ["en"])
+    company_vocabulary: list[str] = Field(default_factory=list)
+    final_refinement_enabled: bool = True
     prompt_config_version: str
     available_models: list[str]
     available_reasoning_efforts: list[str]
+    available_live_transcription_models: list[str] = Field(default_factory=list)
+    available_final_transcription_models: list[str] = Field(default_factory=list)
     voice_enabled: bool = True
-    voice_language: str = "auto"
+    voice_language: str = "en"
     voice_stop_mode: Literal["manual", "vad"] = "manual"
     silence_timeout_ms: int = 1500
     max_recording_seconds: int = 900
@@ -155,6 +163,12 @@ class AiSettingsUpdate(StrictSchema):
     reasoning_effort: str | None = None
     interview_provider: Literal["mock", "live"] | None = None
     transcription_model: str | None = None
+    live_transcription_model: str | None = None
+    final_transcription_model: str | None = None
+    live_delay: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
+    expected_languages: list[str] | None = None
+    company_vocabulary: list[str] | None = None
+    final_refinement_enabled: bool | None = None
     voice_enabled: bool | None = None
     voice_language: str | None = None
     voice_stop_mode: Literal["manual", "vad"] | None = None

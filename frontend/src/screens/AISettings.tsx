@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Info } from 'lucide-react'
-import { getAiSettings, updateAiSettings } from '../lib/api'
+import { getAiSettings, getVoiceDiagnostics, updateAiSettings, type VoiceDiagnostics } from '../lib/api'
 import type { Screen } from '../types'
 
 interface Props {
@@ -135,8 +135,13 @@ export default function AISettings({ dark, onNavigate }: Props) {
   const [vadEnabled, setVadEnabled] = useState(false)
   const [silenceSec, setSilenceSec] = useState(2)
   const [maxMinutes, setMaxMinutes] = useState(15)
-  const [transcriptionModel, setTranscriptionModel] = useState('gpt-4o-transcribe')
-  const [language, setLanguage] = useState('auto')
+  const [liveModel, setLiveModel] = useState('gpt-live-transcribe')
+  const [finalModel, setFinalModel] = useState('gpt-transcribe')
+  const [liveDelay, setLiveDelay] = useState('low')
+  const [languages, setLanguages] = useState('en')
+  const [companyVocabulary, setCompanyVocabulary] = useState('')
+  const [finalRefinement, setFinalRefinement] = useState(true)
+  const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics | null>(null)
   const [saved, setSaved] = useState(false)
   const [model, setModel] = useState('gpt-5.6-terra')
   const [effort, setEffort] = useState('medium')
@@ -155,8 +160,12 @@ export default function AISettings({ dark, onNavigate }: Props) {
         setModels(data.available_models)
         setEfforts(data.available_reasoning_efforts)
         setVoiceEnabled(data.voice_enabled)
-        setTranscriptionModel(data.transcription_model)
-        setLanguage(data.voice_language === 'en-US' ? 'en' : data.voice_language)
+        setLiveModel(data.live_transcription_model || data.transcription_model || 'gpt-live-transcribe')
+        setFinalModel(data.final_transcription_model || 'gpt-transcribe')
+        setLiveDelay(data.live_delay || 'low')
+        setLanguages((data.expected_languages || ['en']).join(','))
+        setCompanyVocabulary((data.company_vocabulary || []).join(', '))
+        setFinalRefinement(data.final_refinement_enabled !== false)
         setVadEnabled(data.voice_stop_mode === 'vad')
         setSilenceSec(Math.round(data.silence_timeout_ms / 1000) || 2)
         setMaxMinutes(Math.round(data.max_recording_seconds / 60) || 15)
@@ -165,20 +174,37 @@ export default function AISettings({ dark, onNavigate }: Props) {
         setRemoteVoice(data.remote_voice_enabled)
       })
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load AI settings'))
+    getVoiceDiagnostics()
+      .then(setDiagnostics)
+      .catch(() => undefined)
   }, [])
 
   async function handleSave() {
     setError(null)
     try {
+      const expected = languages
+        .split(/[,\s]+/)
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean)
+      const vocab = companyVocabulary
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
       await updateAiSettings({
         assessment_model: model,
         reasoning_effort: effort,
         interview_provider: provider,
-        transcription_model: transcriptionModel,
+        live_transcription_model: liveModel,
+        transcription_model: liveModel,
+        final_transcription_model: finalModel,
+        live_delay: liveDelay as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+        expected_languages: expected.length ? expected : ['en'],
+        company_vocabulary: vocab,
+        final_refinement_enabled: finalRefinement,
         voice_enabled: voiceEnabled,
-        voice_language: language === 'Auto-detect' ? 'auto' : language,
+        voice_language: expected[0] || 'en',
         voice_stop_mode: vadEnabled ? 'vad' : 'manual',
-        silence_timeout_ms: Math.max(200, silenceSec * 1000),
+        silence_timeout_ms: Math.max(200, Math.min(10000, silenceSec * 1000)),
         max_recording_seconds: Math.max(30, maxMinutes * 60),
         retain_source_audio: retainAudio,
         retain_corrected_transcript: retainTranscript,
@@ -186,6 +212,8 @@ export default function AISettings({ dark, onNavigate }: Props) {
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
+      const diag = await getVoiceDiagnostics().catch(() => null)
+      if (diag) setDiagnostics(diag)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     }
@@ -217,38 +245,69 @@ export default function AISettings({ dark, onNavigate }: Props) {
             <Toggle checked={voiceEnabled} onChange={setVoiceEnabled} />
           </SettingRow>
 
-          <SettingRow label="Transcription model" hint="Default is gpt-4o-transcribe for OpenAI Realtime WebRTC. Mic/browser failures are logged via /api/voice/client-events." dark={dark}>
+          <SettingRow label="Live transcription model" hint="Pass 1: OpenAI Realtime WebRTC draft. Default gpt-live-transcribe." dark={dark}>
             <SelectField
-              options={['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'gpt-live-transcribe', 'gpt-realtime-whisper', 'whisper-1']}
-              value={transcriptionModel}
-              onChange={setTranscriptionModel}
+              options={['gpt-live-transcribe', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'gpt-realtime-whisper', 'whisper-1']}
+              value={liveModel}
+              onChange={setLiveModel}
             />
           </SettingRow>
 
-          <SettingRow label="Language" hint="Auto-detect works well for English-primary sessions." dark={dark}>
+          <SettingRow label="Final transcription model" hint="Pass 2: accuracy refinement of the finished recording. Default gpt-transcribe." dark={dark}>
             <SelectField
-              options={['auto', 'en', 'de', 'es', 'fr']}
-              value={language}
-              onChange={setLanguage}
+              options={['gpt-transcribe', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1']}
+              value={finalModel}
+              onChange={setFinalModel}
             />
           </SettingRow>
 
-          <SettingRow label="Stop detection" hint="Manual stop keeps the host in control. VAD ends a turn after silence." dark={dark}>
+          <SettingRow label="Live delay" hint="Latency vs accuracy for gpt-live-transcribe." dark={dark}>
+            <SelectField
+              options={['minimal', 'low', 'medium', 'high', 'xhigh']}
+              value={liveDelay}
+              onChange={setLiveDelay}
+            />
+          </SettingRow>
+
+          <SettingRow label="Expected languages" hint="Comma-separated ISO codes, e.g. en or en,es. Default en." dark={dark}>
+            <input
+              value={languages}
+              onChange={e => setLanguages(e.target.value)}
+              className="rounded-lg px-2.5 py-1.5 text-sm outline-none w-36"
+              style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            />
+          </SettingRow>
+
+          <SettingRow label="Company vocabulary" hint="Extra keyword hints (comma-separated). Keep focused — avoid hundreds of terms." dark={dark}>
+            <input
+              value={companyVocabulary}
+              onChange={e => setCompanyVocabulary(e.target.value)}
+              placeholder="AcmeConnect, WidgetAPI"
+              className="rounded-lg px-2.5 py-1.5 text-sm outline-none w-48"
+              style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            />
+          </SettingRow>
+
+          <SettingRow label="Final refinement" hint="Upload the finished answer audio once for gpt-transcribe accuracy pass." dark={dark}>
+            <Toggle checked={finalRefinement} onChange={setFinalRefinement} />
+          </SettingRow>
+
+          <SettingRow label="Legacy VAD stop mode" hint="Not used for gpt-live-transcribe (turn_detection is null). Kept for older models." dark={dark}>
             <div className="flex items-center gap-3">
               <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>VAD</span>
               <Toggle checked={vadEnabled} onChange={setVadEnabled} />
             </div>
           </SettingRow>
 
-          <SettingRow label="Silence timeout" hint="Seconds of silence before VAD stops recording." dark={dark}>
-            <NumberField value={silenceSec} min={1} max={30} suffix="sec" onChange={setSilenceSec} />
+          <SettingRow label="Silence timeout" hint="Only applies when VAD is enabled for non-live models." dark={dark}>
+            <NumberField value={silenceSec} min={1} max={10} suffix="sec" onChange={setSilenceSec} />
           </SettingRow>
 
           <SettingRow label="Maximum recording length" hint="Hard limit per response." dark={dark}>
             <NumberField value={maxMinutes} min={1} max={60} suffix="min" onChange={setMaxMinutes} />
           </SettingRow>
 
-          <SettingRow label="Retain audio after transcription" hint="Disabled by default. Enable only if required for audit purposes." dark={dark}>
+          <SettingRow label="Retain audio after transcription" hint="Disabled by default. Temporary refine uploads are deleted unless this is enabled." dark={dark}>
             <Toggle checked={retainAudio} onChange={setRetainAudio} />
           </SettingRow>
 
@@ -267,6 +326,29 @@ export default function AISettings({ dark, onNavigate }: Props) {
               </span>
             </div>
           </SettingRow>
+
+          {diagnostics && (
+            <div className="py-4">
+              <p className="text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>Voice diagnostics (aggregates)</p>
+              <p className="text-xs mb-3" style={{ color: 'var(--muted-foreground)', lineHeight: 1.5 }}>
+                Safe timings and failure rates only — no audio, transcripts, or credentials.
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--foreground)' }}>
+                <div>Sessions: {diagnostics.session_count}</div>
+                <div>Avg connect: {diagnostics.avg_connection_duration_ms ?? '—'} ms</div>
+                <div>Avg first delta: {diagnostics.avg_time_to_first_delta_ms ?? '—'} ms</div>
+                <div>Avg refine: {diagnostics.avg_refine_duration_ms ?? '—'} ms</div>
+                <div>Empty transcripts: {diagnostics.empty_transcript_count}</div>
+                <div>Refine failures: {diagnostics.refinement_failure_count}</div>
+                <div>Failure rate: {diagnostics.refinement_failure_rate ?? '—'}</div>
+                <div>WebRTC reconnects: {diagnostics.webrtc_reconnect_count}</div>
+                <div>Mic permission fails: {diagnostics.mic_permission_failure_count}</div>
+                <div>Live model: {diagnostics.live_model || '—'}</div>
+                <div>Final model: {diagnostics.final_model || '—'}</div>
+                <div>Last device: {diagnostics.last_device_label || '—'}</div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* AI settings */}

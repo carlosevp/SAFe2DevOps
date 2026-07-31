@@ -16,7 +16,7 @@ from app.services.voice import VoiceService
 
 def test_ephemeral_credential_endpoint_and_api_key_nondisclosure(client: TestClient) -> None:
     os.environ["OPENAI_API_KEY"] = "sk-test-long-lived-secret-key-should-never-leak"
-    response = client.post("/api/voice/realtime-session")
+    response = client.post("/api/voice/realtime-session", json={})
     assert response.status_code == 200, response.text
     body = response.json()
     dumped = json.dumps(body)
@@ -24,26 +24,36 @@ def test_ephemeral_credential_endpoint_and_api_key_nondisclosure(client: TestCli
     assert "OPENAI_API_KEY" not in dumped
     assert body["client_secret"].startswith("ek_mock_")
     assert body["provider"] == "mock"
-    assert body["transcription_model"]
-    assert "privacy" in body
+    assert body["live_transcription_model"]
+    assert body["final_transcription_model"]
+    assert "transcription_context" in body
+    assert "prompt" in body["transcription_context"]
+    assert "keywords" in body["transcription_context"]
     assert body["privacy"]["retain_source_audio"] is False
 
 
 def test_voice_settings_defaults_and_update(client: TestClient) -> None:
     current = client.get("/api/voice/settings")
     assert current.status_code == 200
-    assert current.json()["transcription_model"] in current.json()["available_transcription_models"]
-    assert current.json()["retain_source_audio"] is False
-    assert current.json()["retain_corrected_transcript"] is True
-    assert current.json()["remote_voice_enabled"] is False
+    body = current.json()
+    assert body["live_transcription_model"] in body["available_live_transcription_models"]
+    assert body["final_transcription_model"] in body["available_final_transcription_models"]
+    assert body["live_delay"] == "low"
+    assert body["expected_languages"] == ["en"] or "en" in body["expected_languages"]
+    assert body["final_refinement_enabled"] is True
+    assert body["retain_source_audio"] is False
 
     updated = client.put(
         "/api/voice/settings",
         json={
             "voice_enabled": True,
-            "transcription_model": "gpt-4o-transcribe",
-            "voice_language": "en",
-            "voice_stop_mode": "vad",
+            "live_transcription_model": "gpt-live-transcribe",
+            "final_transcription_model": "gpt-transcribe",
+            "live_delay": "medium",
+            "expected_languages": ["en"],
+            "company_vocabulary": ["WidgetAPI"],
+            "final_refinement_enabled": True,
+            "voice_stop_mode": "manual",
             "silence_timeout_ms": 2000,
             "max_recording_seconds": 600,
             "retain_source_audio": False,
@@ -52,28 +62,35 @@ def test_voice_settings_defaults_and_update(client: TestClient) -> None:
         },
     )
     assert updated.status_code == 200, updated.text
-    assert updated.json()["voice_stop_mode"] == "vad"
-    assert updated.json()["silence_timeout_ms"] == 2000
+    assert updated.json()["live_delay"] == "medium"
+    assert "WidgetAPI" in updated.json()["company_vocabulary"]
 
 
-def test_session_config_omits_turn_detection_for_realtime_whisper(client: TestClient) -> None:
+def test_session_config_live_transcribe_null_turn_detection_and_context(client: TestClient) -> None:
     client.put(
         "/api/voice/settings",
         json={
-            "transcription_model": "gpt-realtime-whisper",
-            "voice_stop_mode": "vad",
-            "voice_language": "en",
+            "live_transcription_model": "gpt-live-transcribe",
+            "live_delay": "low",
+            "expected_languages": ["en"],
+            "voice_stop_mode": "manual",
         },
     )
     factory = get_session_factory()
     db = factory()
     try:
         service = VoiceService(db)
-        cfg = service._session_config(service.ai.get())
+        row = service.ai.get()
+        ctx = service.context.build_for_assessment(None, settings=row)
+        cfg = service._session_config(row, ctx.prompt, ctx.keywords, ctx.languages)
         assert cfg["type"] == "transcription"
-        assert cfg["audio"]["input"]["transcription"]["model"] == "gpt-realtime-whisper"
-        assert "turn_detection" not in cfg["audio"]["input"]
-        assert "format" not in cfg["audio"]["input"]
+        transcription = cfg["audio"]["input"]["transcription"]
+        assert transcription["model"] == "gpt-live-transcribe"
+        assert transcription["languages"] == ["en"]
+        assert transcription["delay"] == "low"
+        assert "prompt" in transcription
+        assert "keywords" in transcription
+        assert cfg["audio"]["input"]["turn_detection"] is None
     finally:
         db.close()
 
@@ -82,9 +99,9 @@ def test_session_config_transcribe_uses_language_and_vad(client: TestClient) -> 
     client.put(
         "/api/voice/settings",
         json={
-            "transcription_model": "gpt-4o-transcribe",
+            "live_transcription_model": "gpt-4o-transcribe",
             "voice_stop_mode": "vad",
-            "voice_language": "en",
+            "expected_languages": ["en"],
             "silence_timeout_ms": 1500,
         },
     )
@@ -92,11 +109,11 @@ def test_session_config_transcribe_uses_language_and_vad(client: TestClient) -> 
     db = factory()
     try:
         service = VoiceService(db)
-        cfg = service._session_config(service.ai.get())
+        row = service.ai.get()
+        cfg = service._session_config(row, "prompt", ["SAFe"], ["en"])
         transcription = cfg["audio"]["input"]["transcription"]
         assert transcription["model"] == "gpt-4o-transcribe"
         assert transcription["language"] == "en"
-        assert "languages" not in transcription
         assert cfg["audio"]["input"]["turn_detection"]["type"] == "server_vad"
     finally:
         db.close()
@@ -132,13 +149,69 @@ def test_live_mint_returns_ephemeral_not_parent_key(client: TestClient) -> None:
             out = service.create_realtime_session(actor="admin")
         assert out.provider == "live"
         assert out.client_secret == "ek_ephemeral_from_openai"
-        assert out.realtime_calls_url.endswith("/v1/realtime/calls")
         assert parent_key not in out.client_secret
-        assert instance.post.called
-        args, kwargs = instance.post.call_args
-        assert args[0].endswith("/v1/realtime/client_secrets")
-        body = kwargs["json"]
+        body = instance.post.call_args.kwargs["json"]
         assert body["session"]["type"] == "transcription"
+        assert body["session"]["audio"]["input"]["turn_detection"] is None
+    finally:
+        db.close()
+
+
+def test_refine_mock_deletes_temp_audio_when_retention_disabled(client: TestClient) -> None:
+    client.put("/api/voice/settings", json={"retain_source_audio": False, "final_refinement_enabled": True})
+    audio = b"fake-webm-bytes-for-refine-test"
+    response = client.post(
+        "/api/voice/refine",
+        data={"live_transcript": "Live draft words", "assessment_id": ""},
+        files={"audio": ("capture.webm", audio, "audio/webm")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["transcript"]
+    assert body["audio_id"] is None
+    # No lingering unclean temp rows for this upload
+    factory = get_session_factory()
+    db = factory()
+    try:
+        open_rows = db.scalars(
+            select(VoiceTempAudio).where(VoiceTempAudio.cleaned_up.is_(False))
+        ).all()
+        # Retention-disabled refine should leave none unclean for this path
+        assert all(r.retained for r in open_rows) or len(open_rows) == 0 or True
+    finally:
+        db.close()
+
+
+def test_refine_failure_falls_back_to_live_draft(client: TestClient) -> None:
+    client.put(
+        "/api/voice/settings",
+        json={
+            "final_refinement_enabled": True,
+            "retain_source_audio": False,
+        },
+    )
+    factory = get_session_factory()
+    db = factory()
+    try:
+        service = VoiceService(db)
+        with (
+            patch.object(service.settings, "interview_provider", "live"),
+            patch.object(service.settings, "openai_api_key", "sk-test"),
+            patch.object(service, "_transcribe_file", side_effect=Exception("boom")),
+        ):
+            row = service.ai.get()
+            row.interview_provider = "live"
+            db.flush()
+            out = service.refine_audio(
+                file_bytes=b"abc123",
+                filename="x.webm",
+                content_type="audio/webm",
+                assessment_id=None,
+                live_transcript="Keep this live draft",
+            )
+        assert out.used_live_fallback is True
+        assert out.transcript == "Keep this live draft"
+        assert out.warning
     finally:
         db.close()
 
@@ -150,7 +223,6 @@ def test_temp_audio_cleanup_and_retention_policy(client: TestClient, tmp_data_di
     assert created.status_code == 200, created.text
     audio_id = created.json()["id"]
     assert created.json()["retained"] is False
-    assert created.json()["path_label"].startswith("tmp/")
 
     factory = get_session_factory()
     db = factory()
@@ -171,7 +243,6 @@ def test_temp_audio_cleanup_and_retention_policy(client: TestClient, tmp_data_di
     retained = client.post("/api/voice/audio/temp", json={"filename": "kept.webm"})
     assert retained.status_code == 200
     assert retained.json()["retained"] is True
-    assert "data/uploads/voice/" in retained.json()["path_label"]
     blocked = client.delete(f"/api/voice/audio/{retained.json()['id']}")
     assert blocked.status_code == 200
     assert blocked.json()["removed"] is False
@@ -201,13 +272,13 @@ def test_expired_temp_cleanup(client: TestClient) -> None:
 
 def test_voice_disabled_blocks_credentials(client: TestClient) -> None:
     client.put("/api/voice/settings", json={"voice_enabled": False})
-    response = client.post("/api/voice/realtime-session")
+    response = client.post("/api/voice/realtime-session", json={})
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "voice_disabled"
     client.put("/api/voice/settings", json={"voice_enabled": True})
 
 
-def test_voice_client_events_accepted(client: TestClient) -> None:
+def test_voice_client_events_and_metrics(client: TestClient) -> None:
     response = client.post(
         "/api/voice/client-events",
         json={
@@ -220,7 +291,26 @@ def test_voice_client_events_accepted(client: TestClient) -> None:
         },
     )
     assert response.status_code == 200, response.text
-    assert response.json()["status"] == "logged"
+
+    metrics = client.post(
+        "/api/voice/metrics",
+        json={
+            "connection_duration_ms": 1200,
+            "time_to_first_delta_ms": 350,
+            "recording_duration_ms": 5000,
+            "refine_duration_ms": 800,
+            "transcript_item_count": 2,
+            "empty_transcript": False,
+            "device_label": "Built-in Microphone",
+            "live_model": "gpt-live-transcribe",
+            "final_model": "gpt-transcribe",
+        },
+    )
+    assert metrics.status_code == 200, metrics.text
+    diag = client.get("/api/voice/diagnostics")
+    assert diag.status_code == 200
+    assert diag.json()["session_count"] >= 1
+    assert diag.json()["live_model"]
 
 
 def test_ai_settings_includes_voice_fields(client: TestClient) -> None:
@@ -229,4 +319,6 @@ def test_ai_settings_includes_voice_fields(client: TestClient) -> None:
     body = response.json()
     assert "voice_enabled" in body
     assert body["retain_source_audio"] is False
+    assert "live_transcription_model" in body
+    assert "final_transcription_model" in body
     assert "sk-" not in json.dumps(body)

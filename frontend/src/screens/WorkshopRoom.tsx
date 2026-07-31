@@ -23,8 +23,13 @@ import {
   type RemoteContribution,
   type RemoteInvite,
 } from '../lib/api'
-import { RealtimeTranscriptionController } from '../lib/realtimeTranscription'
-import { createMicContext, type MicContext } from '../lib/voiceStateMachine'
+import MicrophoneTest from '../components/MicrophoneTest'
+import { RealtimeTranscriptionController, type SessionDiagnostics } from '../lib/realtimeTranscription'
+import {
+  createMicContext,
+  isLiveSpeakingState,
+  type MicContext,
+} from '../lib/voiceStateMachine'
 import type { Screen, CoverageState } from '../types'
 
 interface Props {
@@ -84,9 +89,13 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
   const [typedNote, setTypedNote] = useState('')
   const [privacyNotice, setPrivacyNotice] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
+  const [showMicTest, setShowMicTest] = useState(false)
+  const [voiceDiag, setVoiceDiag] = useState<SessionDiagnostics | null>(null)
+  const [refineFlash, setRefineFlash] = useState(false)
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastIdempotency = useRef<string | null>(null)
   const voiceRef = useRef<RealtimeTranscriptionController | null>(null)
+  const hostEditingLive = useRef(false)
 
   const refreshRemote = useCallback(async () => {
     if (!assessmentId) return
@@ -128,14 +137,27 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
     const controller = new RealtimeTranscriptionController({
       onContext: ctx => {
         setMicCtx(ctx)
-        if (ctx.state === 'ready_to_edit' || ctx.state === 'fallback_text') {
+        if (ctx.state === 'ready_to_edit') {
           const text = controller.getDisplayText()
           if (text) setAnswerText(text)
-        } else if (ctx.state === 'listening' || ctx.state === 'paused' || ctx.state === 'reconnecting') {
-          setAnswerText(controller.getDisplayText())
+          setRefineFlash(true)
+          setTimeout(() => setRefineFlash(false), 2200)
+        } else if (
+          ctx.state === 'refinement_failed' ||
+          ctx.state === 'fallback_text' ||
+          ctx.state === 'finishing' ||
+          ctx.state === 'refining'
+        ) {
+          const text = controller.getDisplayText()
+          if (text) setAnswerText(text)
+        } else if (isLiveSpeakingState(ctx.state) || ctx.state === 'reconnecting') {
+          if (!hostEditingLive.current) {
+            setAnswerText(controller.getDisplayText())
+          }
         }
       },
       onPrivacyNotice: notice => setPrivacyNotice(notice),
+      onDiagnostics: diag => setVoiceDiag(diag),
     })
     voiceRef.current = controller
     const timer = setInterval(() => {
@@ -148,6 +170,10 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
       voiceRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    voiceRef.current?.setAssessmentContext(assessmentId || null, session?.topic_label || null)
+  }, [assessmentId, session?.topic_label])
 
   const loadSession = useCallback(async () => {
     if (!assessmentId) {
@@ -547,46 +573,101 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
                 </div>
               )}
 
-              {voiceEnabled && micCtx.state === 'idle' && (
+              {voiceEnabled && (micCtx.state === 'idle' || micCtx.state === 'ready') && (
                 <div className="text-center py-4">
+                  <p className="text-sm mb-1 font-medium" style={{ color: 'var(--foreground)' }}>{micCtx.statusLabel}</p>
                   <p className="text-sm mb-4" style={{ color: 'var(--muted-foreground)' }}>
-                    Ready to listen. Press the microphone to begin, or type below.
+                    Press the microphone to begin live draft transcription, or type below. Natural pauses will not end the answer.
                   </p>
                   <button
-                    onClick={() => void voiceRef.current?.start()}
+                    onClick={() => {
+                      hostEditingLive.current = false
+                      void voiceRef.current?.start()
+                    }}
                     className="w-16 h-16 rounded-full flex items-center justify-center mx-auto transition-base"
                     style={{ background: 'var(--primary)', color: '#fff' }}
                   >
                     <Mic size={26} />
                   </button>
                   <p className="text-xs mt-3" style={{ color: 'var(--muted-foreground)' }}>
-                    All voices in the room will be transcribed together
+                    All voices near the selected microphone are transcribed together. Distant speakers may be missed.
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowMicTest(v => !v)}
+                    className="text-xs mt-3 underline"
+                    style={{ color: 'var(--muted-foreground)' }}
+                  >
+                    {showMicTest ? 'Hide microphone test' : 'Pre-workshop microphone test'}
+                  </button>
+                  {showMicTest && (
+                    <div className="mt-3 text-left">
+                      <MicrophoneTest
+                        dark={dark}
+                        onDeviceSelected={id => voiceRef.current?.setPreferredDeviceId(id)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
-              {(micCtx.state === 'requesting_permission' || micCtx.state === 'connecting' || micCtx.state === 'reconnecting') && (
+              {(micCtx.state === 'requesting_permission' || micCtx.state === 'connecting' || micCtx.state === 'reconnecting' || micCtx.state === 'disconnected') && (
                 <div className="text-center py-6">
+                  <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>{micCtx.statusLabel}</p>
                   <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                    {micCtx.state === 'reconnecting' ? (micCtx.errorMessage || 'Reconnecting…') : 'Connecting microphone…'}
+                    {micCtx.errorMessage || (micCtx.state === 'reconnecting' ? 'Reconnecting…' : 'Connecting microphone…')}
                   </p>
                 </div>
               )}
 
-              {(micCtx.state === 'listening' || micCtx.state === 'paused') && (
+              {micCtx.state === 'permission_denied' && (
+                <div>
+                  <p className="text-sm mb-3" style={{ color: '#d97706' }}>{micCtx.errorMessage || 'Permission denied'}</p>
+                  <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)' }}>
+                    Continue with a typed response, or grant microphone access and try again.
+                  </p>
+                  <textarea
+                    value={answerText}
+                    onChange={e => setAnswerText(e.target.value)}
+                    className="w-full rounded-lg p-3 text-sm outline-none resize-none"
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', minHeight: 160, lineHeight: 1.7 }}
+                    placeholder="Type the team's answer…"
+                  />
+                  <div className="flex justify-between mt-3">
+                    <button
+                      onClick={() => void voiceRef.current?.start()}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg"
+                      style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}
+                    >
+                      <Mic size={12} /> Try microphone again
+                    </button>
+                    <button
+                      onClick={() => void handleSubmitAnswer()}
+                      disabled={!answerText.trim()}
+                      className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg font-medium"
+                      style={{ background: 'var(--primary)', color: '#fff', opacity: answerText.trim() ? 1 : 0.5 }}
+                    >
+                      <Send size={11} /> Submit response
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {isLiveSpeakingState(micCtx.state) && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <div
                         className="w-2.5 h-2.5 rounded-full"
                         style={{
-                          background: micCtx.state === 'listening' ? '#dc2626' : '#f59e0b',
-                          animation: micCtx.state === 'listening' ? 'pulse-ring 1.5s ease infinite' : 'none',
-                          boxShadow: micCtx.state === 'listening' ? '0 0 0 4px rgba(220,38,38,0.2)' : 'none',
+                          background: micCtx.state === 'paused' ? '#f59e0b' : '#dc2626',
+                          animation: micCtx.state !== 'paused' ? 'pulse-ring 1.5s ease infinite' : 'none',
+                          boxShadow: micCtx.state !== 'paused' ? '0 0 0 4px rgba(220,38,38,0.2)' : 'none',
                         }}
                       />
-                      <span className="text-xs font-medium" style={{ color: micCtx.state === 'listening' ? '#dc2626' : '#f59e0b' }}>
-                        {micCtx.state === 'listening' ? 'Listening…' : 'Paused'}
+                      <span className="text-xs font-medium" style={{ color: micCtx.state === 'paused' ? '#f59e0b' : '#dc2626' }}>
+                        {micCtx.statusLabel}
+                        {micCtx.state === 'live_draft' ? ' (provisional)' : ''}
                       </span>
                     </div>
                     <span className="text-xs font-mono" style={{ color: 'var(--muted-foreground)' }}>
@@ -595,26 +676,33 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
                       <span style={{ display: 'none' }}>{tick}</span>
                     </span>
                   </div>
+                  <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)' }}>
+                    Live draft — text may revise as segments complete. Not final until you finish and review.
+                  </p>
                   <textarea
                     value={answerText}
-                    onChange={e => setAnswerText(e.target.value)}
+                    onChange={e => {
+                      hostEditingLive.current = true
+                      setAnswerText(e.target.value)
+                    }}
                     className="w-full rounded-lg p-3 text-sm outline-none resize-none"
                     style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', minHeight: 140, lineHeight: 1.7 }}
-                    placeholder="Live transcript will appear here…"
+                    placeholder="Live draft will appear here…"
                   />
                   <div className="flex items-center justify-between mt-3">
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => (micCtx.state === 'listening' ? voiceRef.current?.pause() : voiceRef.current?.resume())}
+                        onClick={() => (micCtx.state === 'paused' ? voiceRef.current?.resume() : voiceRef.current?.pause())}
                         className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg"
                         style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
                       >
-                        {micCtx.state === 'listening' ? <Pause size={12} /> : <Mic size={12} />}
-                        {micCtx.state === 'listening' ? 'Pause' : 'Resume'}
+                        {micCtx.state === 'paused' ? <Mic size={12} /> : <Pause size={12} />}
+                        {micCtx.state === 'paused' ? 'Resume' : 'Pause'}
                       </button>
                       <button
                         onClick={() => {
                           voiceRef.current?.discard()
+                          hostEditingLive.current = false
                           setAnswerText('')
                           setElapsed(0)
                         }}
@@ -626,7 +714,10 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
                       </button>
                     </div>
                     <button
-                      onClick={() => void voiceRef.current?.finish()}
+                      onClick={() => {
+                        hostEditingLive.current = false
+                        void voiceRef.current?.finish()
+                      }}
                       className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg font-medium"
                       style={{ background: 'var(--primary)', color: '#fff' }}
                     >
@@ -661,14 +752,36 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
                 </div>
               )}
 
-              {(micCtx.state === 'ready_to_edit' || micCtx.state === 'fallback_text' || micCtx.state === 'error' || (!voiceEnabled && micCtx.state === 'idle')) && (
+              {(micCtx.state === 'finishing' || micCtx.state === 'refining') && (
                 <div>
-                  {(micCtx.state === 'fallback_text' || micCtx.state === 'error') && micCtx.errorMessage && (
-                    <p className="text-sm mb-3" style={{ color: '#d97706' }}>{micCtx.errorMessage}</p>
+                  <p className="text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>{micCtx.statusLabel}</p>
+                  <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)' }}>
+                    {micCtx.state === 'finishing'
+                      ? 'Freezing the live draft…'
+                      : 'Refining transcript for accuracy. The live draft is preserved if refinement fails.'}
+                  </p>
+                  <textarea
+                    value={answerText}
+                    readOnly
+                    className="w-full rounded-lg p-3 text-sm outline-none resize-none opacity-90"
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', minHeight: 140, lineHeight: 1.7 }}
+                  />
+                </div>
+              )}
+
+              {(micCtx.state === 'ready_to_edit' || micCtx.state === 'refinement_failed' || micCtx.state === 'fallback_text' || micCtx.state === 'error' || (!voiceEnabled && micCtx.state === 'idle')) && (
+                <div>
+                  {(micCtx.state === 'fallback_text' || micCtx.state === 'error' || micCtx.state === 'refinement_failed') && (micCtx.errorMessage || micCtx.refinementWarning) && (
+                    <p className="text-sm mb-3" style={{ color: '#d97706' }}>
+                      {micCtx.refinementWarning || micCtx.errorMessage}
+                    </p>
+                  )}
+                  {refineFlash && micCtx.state === 'ready_to_edit' && (
+                    <p className="text-xs mb-2" style={{ color: '#0f8b8d' }}>Accuracy refinement completed — review before submitting.</p>
                   )}
                   <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)' }}>
-                    {micCtx.state === 'ready_to_edit'
-                      ? 'Review and edit the transcript, then submit when the host confirms it is complete.'
+                    {micCtx.state === 'ready_to_edit' || micCtx.state === 'refinement_failed'
+                      ? 'Edit the transcript, then submit only when the host confirms it is complete. Nothing is auto-submitted.'
                       : 'Type the team\'s response. You can edit freely before submitting.'}
                   </p>
                   <textarea
@@ -682,12 +795,25 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
                     <div className="flex items-center gap-2">
                       {voiceEnabled && (
                         <button
-                          onClick={() => void voiceRef.current?.start()}
+                          onClick={() => {
+                            hostEditingLive.current = false
+                            void voiceRef.current?.start()
+                          }}
                           className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg"
                           style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
                         >
                           <Mic size={12} />
                           Record again
+                        </button>
+                      )}
+                      {micCtx.state === 'refinement_failed' && (
+                        <button
+                          onClick={() => void voiceRef.current?.retryRefine()}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg"
+                          style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
+                        >
+                          <RotateCcw size={12} />
+                          Retry refinement
                         </button>
                       )}
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Autosaves as you type</span>
@@ -702,6 +828,25 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId }: Props) 
                       Submit response
                     </button>
                   </div>
+                  {import.meta.env.DEV && voiceDiag && (
+                    <details className="mt-4 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                      <summary>Dev voice diagnostics</summary>
+                      <pre className="mt-2 whitespace-pre-wrap rounded-lg p-2" style={{ background: 'var(--muted)' }}>
+{JSON.stringify({
+  connectionState: voiceDiag.connectionState,
+  itemIds: voiceDiag.itemIds,
+  timeToFirstDeltaMs: voiceDiag.timeToFirstDeltaMs,
+  refineDurationMs: voiceDiag.refineDurationMs,
+  deviceLabel: voiceDiag.deviceLabel,
+  liveModel: voiceDiag.liveModel,
+  finalModel: voiceDiag.finalModel,
+  liveDraft: voiceDiag.liveDraft,
+  completedRealtime: voiceDiag.completedRealtime,
+  refinedFinal: voiceDiag.refinedFinal,
+}, null, 2)}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               )}
             </div>

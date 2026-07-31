@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createMicContext, displayTranscript, reduceMic } from './voiceStateMachine'
 
-describe('voice state machine', () => {
+describe('voice state machine (two-pass)', () => {
   it('moves through start → permission → connect → listening', () => {
     let ctx = createMicContext()
     ctx = reduceMic(ctx, { type: 'START' })
@@ -12,18 +12,37 @@ describe('voice state machine', () => {
     expect(ctx.state).toBe('listening')
   })
 
-  it('handles partial and final transcript editing path', () => {
+  it('shows live draft from partials and finishes into refining', () => {
     let ctx = createMicContext()
     ctx = reduceMic(ctx, { type: 'START' })
     ctx = reduceMic(ctx, { type: 'PERMISSION_GRANTED' })
     ctx = reduceMic(ctx, { type: 'CONNECTED' })
     ctx = reduceMic(ctx, { type: 'PARTIAL', text: 'Hello team' })
+    expect(ctx.state).toBe('live_draft')
     expect(displayTranscript(ctx)).toContain('Hello team')
     ctx = reduceMic(ctx, { type: 'FINAL_SEGMENT', text: 'Hello team from the room.' })
     ctx = reduceMic(ctx, { type: 'FINISH' })
+    expect(ctx.state).toBe('finishing')
+    expect(ctx.liveDraftFrozen).toContain('Hello team')
+    ctx = reduceMic(ctx, { type: 'FINISHING_DONE' })
+    expect(ctx.state).toBe('refining')
+    ctx = reduceMic(ctx, { type: 'REFINED', text: 'Hello team from the room, refined.' })
     expect(ctx.state).toBe('ready_to_edit')
-    expect(ctx.finalTranscript).toContain('Hello team from the room.')
-    expect(ctx.partialTranscript).toBe('')
+    expect(ctx.finalTranscript).toContain('refined')
+  })
+
+  it('keeps live draft when refinement fails', () => {
+    let ctx = createMicContext()
+    ctx = reduceMic(ctx, { type: 'START' })
+    ctx = reduceMic(ctx, { type: 'PERMISSION_GRANTED' })
+    ctx = reduceMic(ctx, { type: 'CONNECTED' })
+    ctx = reduceMic(ctx, { type: 'PARTIAL', text: 'Live only' })
+    ctx = reduceMic(ctx, { type: 'FINISH' })
+    ctx = reduceMic(ctx, { type: 'FINISHING_DONE' })
+    ctx = reduceMic(ctx, { type: 'REFINE_FAILED', message: 'upstream failed' })
+    expect(ctx.state).toBe('refinement_failed')
+    expect(ctx.finalTranscript).toContain('Live only')
+    expect(ctx.refinementWarning).toMatch(/upstream|retained/i)
   })
 
   it('supports pause/resume and discard', () => {
@@ -58,7 +77,7 @@ describe('voice state machine', () => {
     let ctx = createMicContext()
     ctx = reduceMic(ctx, { type: 'START' })
     ctx = reduceMic(ctx, { type: 'PERMISSION_DENIED', message: 'Denied' })
-    expect(ctx.state).toBe('fallback_text')
+    expect(ctx.state).toBe('permission_denied')
     expect(ctx.errorMessage).toMatch(/Denied|permission/i)
   })
 })

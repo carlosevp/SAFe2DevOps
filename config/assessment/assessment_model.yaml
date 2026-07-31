@@ -57,13 +57,13 @@ evidence_influence_policies:
     allow_evidence_to_lower_score: true
 model_defaults:
   assessment_model: gpt-5.6-terra
-  transcription_model: gpt-4o-transcribe
+  transcription_model: gpt-live-transcribe
   reasoning_effort: medium
   temperature: 0.2
   max_output_tokens: 2048
 voice_defaults:
   enabled: true
-  language: en-US
+  language: en
   interim_results: true
   max_utterance_seconds: 180
   silence_timeout_ms: 1500

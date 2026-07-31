@@ -16,7 +16,8 @@ export class ApiError extends Error {
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers || {})
-  if (init.body && !headers.has('Content-Type')) {
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData
+  if (init.body && !headers.has('Content-Type') && !isFormData) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -276,9 +277,17 @@ export type AiSettings = {
   reasoning_effort: string
   interview_provider: 'mock' | 'live'
   transcription_model: string
+  live_transcription_model: string
+  final_transcription_model: string
+  live_delay: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  expected_languages: string[]
+  company_vocabulary: string[]
+  final_refinement_enabled: boolean
   prompt_config_version: string
   available_models: string[]
   available_reasoning_efforts: string[]
+  available_live_transcription_models?: string[]
+  available_final_transcription_models?: string[]
   voice_enabled: boolean
   voice_language: string
   voice_stop_mode: 'manual' | 'vad'
@@ -296,18 +305,52 @@ export type RealtimeSessionCredentials = {
   provider: 'mock' | 'live'
   realtime_calls_url: string
   transcription_model: string
+  live_transcription_model: string
+  final_transcription_model: string
+  live_delay: string
+  languages: string[]
   language: string | null
   stop_mode: 'manual' | 'vad'
   silence_timeout_ms: number
   max_recording_seconds: number
   voice_enabled: boolean
+  final_refinement_enabled: boolean
   session_config: Record<string, unknown>
+  transcription_context: { prompt: string; keywords: string[]; languages: string[] }
   privacy: {
     retain_source_audio: boolean
     retain_corrected_transcript: boolean
     storage_mode: string
     privacy_notice: string
   }
+}
+
+export type RefineTranscriptResult = {
+  transcript: string
+  model: string
+  used_live_fallback: boolean
+  audio_id: string | null
+  retained: boolean
+  refined: boolean
+  warning: string | null
+  duration_ms: number | null
+}
+
+export type VoiceDiagnostics = {
+  session_count: number
+  avg_connection_duration_ms: number | null
+  avg_time_to_first_delta_ms: number | null
+  avg_recording_duration_ms: number | null
+  avg_refine_duration_ms: number | null
+  transcript_item_count: number
+  empty_transcript_count: number
+  refinement_failure_count: number
+  webrtc_reconnect_count: number
+  mic_permission_failure_count: number
+  refinement_failure_rate: number | null
+  live_model: string
+  final_model: string
+  last_device_label: string | null
 }
 
 export function startInterview(assessmentId: string) {
@@ -363,6 +406,12 @@ export function updateAiSettings(body: {
   reasoning_effort?: string
   interview_provider?: 'mock' | 'live'
   transcription_model?: string
+  live_transcription_model?: string
+  final_transcription_model?: string
+  live_delay?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  expected_languages?: string[]
+  company_vocabulary?: string[]
+  final_refinement_enabled?: boolean
   voice_enabled?: boolean
   voice_language?: string
   voice_stop_mode?: 'manual' | 'vad'
@@ -375,8 +424,51 @@ export function updateAiSettings(body: {
   return apiFetch<AiSettings>('/api/ai-settings', { method: 'PUT', body: JSON.stringify(body) })
 }
 
-export function createRealtimeSession() {
-  return apiFetch<RealtimeSessionCredentials>('/api/voice/realtime-session', { method: 'POST' })
+export function createRealtimeSession(body?: { assessment_id?: string | null; topic_label?: string | null }) {
+  return apiFetch<RealtimeSessionCredentials>('/api/voice/realtime-session', {
+    method: 'POST',
+    body: JSON.stringify({
+      assessment_id: body?.assessment_id || null,
+      topic_label: body?.topic_label || null,
+    }),
+  })
+}
+
+export function refineVoiceTranscript(params: {
+  blob: Blob
+  filename?: string
+  assessmentId?: string | null
+  liveTranscript: string
+}) {
+  const form = new FormData()
+  form.append('audio', params.blob, params.filename || 'capture.webm')
+  form.append('live_transcript', params.liveTranscript || '')
+  if (params.assessmentId) form.append('assessment_id', params.assessmentId)
+  return apiFetch<RefineTranscriptResult>('/api/voice/refine', { method: 'POST', body: form })
+}
+
+export function reportVoiceMetrics(body: {
+  connection_duration_ms?: number
+  time_to_first_delta_ms?: number
+  recording_duration_ms?: number
+  refine_duration_ms?: number
+  transcript_item_count?: number
+  empty_transcript?: boolean
+  refinement_failed?: boolean
+  webrtc_reconnect?: boolean
+  mic_permission_failure?: boolean
+  device_label?: string | null
+  live_model?: string
+  final_model?: string
+}) {
+  return apiFetch<VoiceDiagnostics>('/api/voice/metrics', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function getVoiceDiagnostics() {
+  return apiFetch<VoiceDiagnostics>('/api/voice/diagnostics')
 }
 
 export function reportVoiceClientEvent(body: {

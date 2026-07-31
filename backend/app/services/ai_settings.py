@@ -30,6 +30,11 @@ class AiSettingsService:
         )
         if row is None:
             model_cfg = get_assessment_model_config()
+            live_model = (
+                self.settings.openai_transcription_model
+                or model_cfg.model_defaults.transcription_model
+                or "gpt-live-transcribe"
+            )
             row = AiRuntimeSettings(
                 singleton_key="default",
                 assessment_model=self.settings.openai_assessment_model
@@ -37,8 +42,14 @@ class AiSettingsService:
                 reasoning_effort=self.settings.openai_reasoning_effort
                 or model_cfg.model_defaults.reasoning_effort,
                 interview_provider=self.settings.interview_provider,
-                transcription_model=self.settings.openai_transcription_model
-                or model_cfg.model_defaults.transcription_model,
+                transcription_model=live_model,
+                live_transcription_model=live_model,
+                final_transcription_model="gpt-transcribe",
+                live_delay="low",
+                expected_languages_json='["en"]',
+                company_vocabulary_json="[]",
+                final_refinement_enabled=True,
+                voice_language="en",
             )
             self.db.add(row)
             self.db.flush()

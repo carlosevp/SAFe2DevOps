@@ -119,14 +119,23 @@ def complete_interview(
 def _ai_settings_out(db: Session) -> AiSettingsOut:
     service = AiSettingsService(db)
     row = service.get()
+    voice = VoiceService(db).voice_settings_out(row)
     return AiSettingsOut(
         assessment_model=row.assessment_model,
         reasoning_effort=row.reasoning_effort,
         interview_provider=row.interview_provider,  # type: ignore[arg-type]
-        transcription_model=row.transcription_model,
+        transcription_model=voice.live_transcription_model,
+        live_transcription_model=voice.live_transcription_model,
+        final_transcription_model=voice.final_transcription_model,
+        live_delay=voice.live_delay,
+        expected_languages=voice.expected_languages,
+        company_vocabulary=voice.company_vocabulary,
+        final_refinement_enabled=voice.final_refinement_enabled,
         prompt_config_version=service.prompt_config_version(),
         available_models=AVAILABLE_MODELS,
         available_reasoning_efforts=AVAILABLE_EFFORTS,
+        available_live_transcription_models=voice.available_live_transcription_models,
+        available_final_transcription_models=voice.available_final_transcription_models,
         voice_enabled=bool(row.voice_enabled),
         voice_language=row.voice_language,
         voice_stop_mode=row.voice_stop_mode,  # type: ignore[arg-type]
@@ -162,6 +171,12 @@ def update_ai_settings(
     )
     voice_fields = {
         "transcription_model": body.transcription_model,
+        "live_transcription_model": body.live_transcription_model,
+        "final_transcription_model": body.final_transcription_model,
+        "live_delay": body.live_delay,
+        "expected_languages": body.expected_languages,
+        "company_vocabulary": body.company_vocabulary,
+        "final_refinement_enabled": body.final_refinement_enabled,
         "voice_enabled": body.voice_enabled,
         "voice_language": body.voice_language,
         "voice_stop_mode": body.voice_stop_mode,
