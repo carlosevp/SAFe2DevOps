@@ -204,7 +204,7 @@ class MockInterviewProvider:
             needs_clarification = True
             clarification = "What happens after code is merged—how do you test, deploy, and learn whether the change helped?"
 
-        next_q, reason = self._next_question(coverage_map, known_keys, matched)
+        next_q, reason = self._next_question(coverage_map, known_keys, matched, context)
         sufficient = sum(1 for v in coverage_map.values() if v == CoverageState.SUFFICIENT.value)
         recommendation: str = "continue"
         if sufficient >= 12:
@@ -341,8 +341,47 @@ class MockInterviewProvider:
         return list(by_key.values())
 
     def _next_question(
-        self, coverage_map: dict[str, str], known: set[str], matched: list[str]
+        self,
+        coverage_map: dict[str, str],
+        known: set[str],
+        matched: list[str],
+        context: dict[str, Any] | None = None,
     ) -> tuple[str, str]:
+        context = context or {}
+        known_standards = set(context.get("known_standard_keys") or [])
+        open_standards = [
+            item
+            for item in (context.get("standard_findings") or [])
+            if (item.get("status") if isinstance(item, dict) else None)
+            in {"insufficient_evidence", "finding", "partially_aligned"}
+        ]
+        # Prefer multi-coverage prompts when both SAFe and enterprise needs remain.
+        if known_standards and open_standards:
+            build_open = coverage_map.get("build") in {
+                CoverageState.NOT_DISCUSSED.value,
+                CoverageState.PARTIAL.value,
+                CoverageState.CLARIFY.value,
+                None,
+            }
+            deploy_open = coverage_map.get("deploy") in {
+                CoverageState.NOT_DISCUSSED.value,
+                CoverageState.PARTIAL.value,
+                CoverageState.CLARIFY.value,
+                None,
+            }
+            if build_open or "pull_request_quality_gates" in known_standards:
+                return (
+                    "Azure DevOps shows pull-request validation running regularly, but available evidence "
+                    "does not clearly show how credentials are provided to builds and deployments. "
+                    "Walk us through what checks must pass before merge and how secrets reach pipelines.",
+                    "Gathering build, quality-gate, and security context in one discussion.",
+                )
+            if deploy_open or "approved_deployment_automation" in known_standards:
+                return (
+                    "Walk us through how a change reaches production and what monitoring confirms it is healthy afterward.",
+                    "Gathering deploy, monitoring, and platform context in one discussion.",
+                )
+
         priority = [
             "hypothesize",
             "collaborate_research",

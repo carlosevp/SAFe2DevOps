@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.assessment_config import get_assessment_model_config
@@ -267,21 +267,26 @@ class InterviewService:
         session.draft_answer_text = ""
         session.last_analysis_ref = analysis_ref
         session.coverage_confirmation = confirmation
-        session.overall_coverage_summary = analysis.overall_coverage_summary
+        # Host-facing summaries must never reveal enterprise statuses/findings.
+        session.overall_coverage_summary = self._sanitize_host_narrative(
+            analysis.overall_coverage_summary
+        )
         session.last_telemetry_json = json.dumps(
             {**telemetry, "prompt_config_version": session.prompt_config_version}
         )
         session.provider_mode = provider.name
 
         if analysis.needs_immediate_clarification and analysis.clarification_question:
-            session.pending_clarification = analysis.clarification_question
+            session.pending_clarification = self._sanitize_host_narrative(
+                analysis.clarification_question
+            )
             session.last_outcome = "clarify"
         else:
             session.pending_clarification = None
             session.last_outcome = "sufficient"
             next_q = self._select_next_question(assessment, analysis)
-            session.current_question = next_q["question"]
-            session.why_asking = next_q["why"]
+            session.current_question = self._sanitize_host_narrative(next_q["question"])
+            session.why_asking = self._sanitize_host_narrative(next_q["why"])
             session.evidence_context = next_q["evidence"]
             session.topic_label = next_q["topic"]
             self._create_system_turn(
@@ -711,9 +716,14 @@ class InterviewService:
     def _select_next_question(
         self, assessment: Assessment, analysis: InterviewAnalysisAI
     ) -> dict[str, str]:
-        """Server-side next-best question selection; AI suggestion is advisory only."""
+        """Server-side next-best question selection; AI suggestion is advisory only.
+
+        Optimizes for hidden SAFe practice coverage and applicable enterprise-standard
+        coverage together. Prefers multi-coverage questions; never runs a separate
+        enterprise questionnaire.
+        """
         coverages = {c.practice_key: c for c in assessment.practice_coverages}
-        # Priority 1: clarify states
+        # Priority 1: clarify states (immediate ambiguity)
         for domain, practice in self.model.ordered_practices():
             cov = coverages.get(practice.key)
             if cov and cov.coverage_state == CoverageState.CLARIFY.value:
@@ -728,7 +738,23 @@ class InterviewService:
                     "evidence": self._evidence_blurb(assessment),
                     "topic": domain.short_name,
                 }
-        # Priority 2: low confidence / partial
+        # Priority 2: multi-coverage SAFe + enterprise (prefer simultaneous gathering)
+        multi_q = self._select_multi_coverage_question(assessment, analysis)
+        if multi_q is not None:
+            return multi_q
+        # Priority 3: contradictions
+        for cov in assessment.practice_coverages:
+            contras = json.loads(cov.contradictions_json or "[]")
+            if contras:
+                practice = self.model.require_practice(cov.practice_key)
+                domain = next(d for d, p in self.model.ordered_practices() if p.key == practice.key)
+                return {
+                    "question": practice.clarification_seeds[0].text,
+                    "why": "There is a tension between what the team said and observed tool evidence.",
+                    "evidence": contras[0],
+                    "topic": domain.short_name,
+                }
+        # Priority 4: low confidence / partial (single-practice fallback)
         low = sorted(
             [
                 c
@@ -746,30 +772,13 @@ class InterviewService:
                 "evidence": self._evidence_blurb(assessment),
                 "topic": domain.short_name,
             }
-        # Priority 3: contradictions
-        for cov in assessment.practice_coverages:
-            contras = json.loads(cov.contradictions_json or "[]")
-            if contras:
-                practice = self.model.require_practice(cov.practice_key)
-                domain = next(d for d, p in self.model.ordered_practices() if p.key == practice.key)
-                return {
-                    "question": practice.clarification_seeds[0].text,
-                    "why": "There is a tension between what the team said and observed tool evidence.",
-                    "evidence": contras[0],
-                    "topic": domain.short_name,
-                }
-        # Priority 3b: combined SAFe + enterprise standard coverage
-        enterprise_q = self._select_enterprise_combined_question(assessment, analysis)
-        if enterprise_q is not None:
-            return enterprise_q
-        # Priority 4/6: uncovered + domain balance
+        # Priority 5: uncovered + domain balance
         touched_domains = {
             c.domain_key
             for c in assessment.practice_coverages
             if c.coverage_state != CoverageState.NOT_DISCUSSED.value
         }
         ordered = self.model.ordered_practices()
-        # Prefer domains not yet touched.
         for domain, practice in ordered:
             if domain.key not in touched_domains:
                 cov = coverages.get(practice.key)
@@ -790,7 +799,6 @@ class InterviewService:
                     "evidence": self._evidence_blurb(assessment),
                     "topic": domain.short_name,
                 }
-        # Fall back to model suggestion (sanitized).
         return {
             "question": analysis.next_best_question,
             "why": analysis.reason_for_next_question,
@@ -826,9 +834,11 @@ class InterviewService:
             "tool_signals": tool_signals,
             "required_dimensions": list(self.model.required_evaluation_dimensions),
             "question_priority_guidance": [
-                "remaining SAFe coverage",
-                "applicable enterprise standards",
-                "questions that cover both SAFe and enterprise needs",
+                "Optimize for remaining SAFe coverage and applicable enterprise-standard coverage together",
+                "Prefer one question that gathers evidence for several SAFe practices and standards at once",
+                "Do not ask enterprise standards as a separate questionnaire or one-by-one checklist",
+                "Never invent standard keys; use only known_standard_keys",
+                "Never mention enterprise-standard titles, statuses, or findings in facilitator-facing narratives",
                 "human/tool contradictions",
                 "missing evidence",
                 "assessment fatigue and existing question count",
@@ -836,14 +846,20 @@ class InterviewService:
             **self.enterprise.interview_context_payload(assessment.id),
         }
 
-    def _select_enterprise_combined_question(
+    def _select_multi_coverage_question(
         self, assessment: Assessment, analysis: InterviewAnalysisAI
     ) -> dict[str, str] | None:
-        """Prefer one question that advances both SAFe practices and an open standard."""
-        findings = self.enterprise.list_findings(assessment.id)
+        """Prefer questions that advance several SAFe practices and open standards together.
+
+        Host-facing copy stays neutral: no standard titles, statuses, or finding language.
+        Caps how often multi-coverage prompts are injected so standards are not grilled one-by-one.
+        """
+        if self._multi_coverage_question_count(assessment.id) >= 3:
+            return None
+
         open_findings = [
             f
-            for f in findings
+            for f in self.enterprise.list_findings(assessment.id)
             if f.status
             in {
                 StandardFindingStatus.INSUFFICIENT_EVIDENCE,
@@ -853,48 +869,220 @@ class InterviewService:
         ]
         if not open_findings:
             return None
+
         coverages = {c.practice_key: c for c in assessment.practice_coverages}
-        for finding in open_findings:
-            for practice_key in finding.mapped_practice_keys:
-                cov = coverages.get(practice_key)
-                if cov is None:
-                    continue
-                if cov.coverage_state in {
-                    CoverageState.NOT_DISCUSSED.value,
-                    CoverageState.PARTIAL.value,
-                    CoverageState.CLARIFY.value,
-                }:
-                    practice = self.model.require_practice(practice_key)
-                    guidance = ""
-                    for snap in self.enterprise.list_snapshots(assessment.id):
-                        if snap.stable_key == finding.stable_key:
-                            guidance = snap.definition.get("primary_interview_guidance") or ""
-                            break
-                    question = (
-                        f"{self._evidence_blurb(assessment)}. "
-                        f"{guidance or practice.question_seeds[0].text} "
-                        f"Also help us understand alignment with the enterprise standard "
-                        f"“{finding.title}”."
-                    )
-                    if analysis.next_best_question and len(analysis.next_best_question) > 40:
-                        # Prefer model combined suggestion when it already bridges both.
-                        if finding.title.lower().split()[
-                            0
-                        ] in analysis.next_best_question.lower() or any(
-                            k.replace("_", " ") in analysis.next_best_question.lower()
-                            for k in finding.mapped_practice_keys
-                        ):
-                            question = analysis.next_best_question
-                    return {
-                        "question": question[:4000],
-                        "why": (
-                            f"Covering SAFe {practice.name} together with enterprise standard "
-                            f"{finding.title}."
-                        ),
-                        "evidence": self._evidence_blurb(assessment),
-                        "topic": "SAFe + Enterprise",
-                    }
-        return None
+        open_practice_keys = {
+            key
+            for key, cov in coverages.items()
+            if cov.coverage_state
+            in {
+                CoverageState.NOT_DISCUSSED.value,
+                CoverageState.PARTIAL.value,
+                CoverageState.CLARIFY.value,
+            }
+        }
+        if not open_practice_keys:
+            return None
+
+        # Score practice clusters by how many open standards they can also advance.
+        best: dict[str, Any] | None = None
+        best_score = 0
+        for practice_key in open_practice_keys:
+            related = [
+                f for f in open_findings if practice_key in (f.mapped_practice_keys or [])
+            ]
+            if not related:
+                continue
+            related_practices = {
+                pk
+                for f in related
+                for pk in (f.mapped_practice_keys or [])
+                if pk in open_practice_keys
+            }
+            # Score: open practices in cluster + open standards touched (prefer multi).
+            score = len(related_practices) + len(related)
+            if score > best_score:
+                best_score = score
+                best = {
+                    "anchor_practice": practice_key,
+                    "practices": sorted(related_practices),
+                    "findings": related,
+                }
+
+        # Require at least one open practice + one open standard; prefer score >= 3
+        # (e.g. 2 practices + 1 standard, or 1 practice + 2 standards).
+        if best is None or best_score < 2:
+            return None
+        # If only a single practice+standard pair remains and fatigue is high, skip.
+        answered = self._answered_turn_count(assessment.id)
+        if best_score == 2 and answered >= 10:
+            return None
+
+        anchor = self.model.require_practice(best["anchor_practice"])
+        domain = next(d for d, p in self.model.ordered_practices() if p.key == anchor.key)
+        guidance_bits: list[str] = []
+        for finding in best["findings"][:3]:
+            for snap in self.enterprise.list_snapshots(assessment.id):
+                if snap.stable_key == finding.stable_key:
+                    bit = (snap.definition.get("primary_interview_guidance") or "").strip()
+                    if bit and bit not in guidance_bits:
+                        guidance_bits.append(bit)
+                    break
+
+        practice_names = [
+            self._practice_name(pk) for pk in best["practices"][:3]
+        ]
+        themes = self._neutral_themes_for_findings(best["findings"])
+
+        # Prefer the model's multi-coverage suggestion when it already bridges topics.
+        model_q = (analysis.next_best_question or "").strip()
+        model_bridges = bool(model_q) and len(model_q) > 40 and (
+            any(name.lower().split()[0] in model_q.lower() for name in practice_names)
+            or any(
+                theme.split()[0] in model_q.lower()
+                for theme in themes
+                if theme
+            )
+            or any(
+                pk.replace("_", " ") in model_q.lower() for pk in best["practices"]
+            )
+        )
+
+        if model_bridges and not self._contains_enterprise_leak(model_q):
+            question = model_q
+        else:
+            seed = (
+                guidance_bits[0]
+                if guidance_bits
+                else (
+                    anchor.question_seeds[0].text
+                    if anchor.question_seeds
+                    else analysis.next_best_question
+                )
+            )
+            extras = ""
+            if len(guidance_bits) > 1:
+                extras = " " + guidance_bits[1]
+            elif len(best["practices"]) > 1:
+                extras = (
+                    f" Also cover how this connects to {practice_names[1]}"
+                    + (f" and {practice_names[2]}" if len(practice_names) > 2 else "")
+                    + "."
+                )
+            question = f"{self._evidence_blurb(assessment)}. {seed}{extras}".strip()
+
+        why = (
+            "This helps us understand several delivery practices in one discussion"
+            + (f", including useful context about your {' and '.join(themes)}" if themes else "")
+            + "."
+        )
+        return {
+            "question": question[:4000],
+            "why": why,
+            "evidence": self._evidence_blurb(assessment),
+            "topic": domain.short_name,
+        }
+
+    def _answered_turn_count(self, assessment_id: str) -> int:
+        return int(
+            self.db.scalar(
+                select(func.count())
+                .select_from(InterviewTurn)
+                .where(
+                    InterviewTurn.assessment_id == assessment_id,
+                    InterviewTurn.answer_text.is_not(None),
+                    InterviewTurn.answer_text != "",
+                )
+            )
+            or 0
+        )
+
+    def _multi_coverage_question_count(self, assessment_id: str) -> int:
+        """Count prior system questions that already probed platform/security themes."""
+        turns = self.db.scalars(
+            select(InterviewTurn).where(
+                InterviewTurn.assessment_id == assessment_id,
+                InterviewTurn.source == InterviewTurnSource.SYSTEM.value,
+            )
+        ).all()
+        markers = (
+            "credentials are provided",
+            "secret",
+            "quality gates",
+            "platform",
+            "observability",
+            "approved deployment",
+            "several delivery practices",
+        )
+        count = 0
+        for turn in turns:
+            text = (turn.question_text or "").lower()
+            if any(m in text for m in markers):
+                count += 1
+        return count
+
+    def _neutral_themes_for_findings(self, findings: list[Any]) -> list[str]:
+        theme_by_category = {
+            "security": "security practices",
+            "platform": "platform practices",
+            "delivery": "delivery practices",
+            "operations": "operations practices",
+        }
+        themes: list[str] = []
+        for finding in findings:
+            category = (getattr(finding, "category", None) or "").strip().lower()
+            theme = theme_by_category.get(category)
+            if not theme:
+                key = (getattr(finding, "stable_key", None) or "").lower()
+                if "secret" in key or "security" in key:
+                    theme = "security practices"
+                elif "observ" in key or "monitor" in key:
+                    theme = "operations practices"
+                elif "runtime" in key or "openshift" in key or "platform" in key:
+                    theme = "platform practices"
+                else:
+                    theme = "delivery practices"
+            if theme not in themes:
+                themes.append(theme)
+        return themes[:3]
+
+    def _contains_enterprise_leak(self, text: str) -> bool:
+        lower = (text or "").lower()
+        banned = (
+            "enterprise standard",
+            "enterprise standards",
+            "enterprise alignment",
+            "standard finding",
+            "partially_aligned",
+            "insufficient_evidence",
+            "not_applicable",
+            "alignment score",
+        )
+        return any(token in lower for token in banned)
+
+    def _sanitize_host_narrative(self, text: str | None) -> str:
+        """Remove enterprise statuses/findings language from host-visible strings."""
+        if not text:
+            return ""
+        cleaned = sanitize_remote_text(text, max_len=4000)
+        replacements = (
+            ("enterprise standards", "platform and delivery practices"),
+            ("enterprise standard", "platform practice"),
+            ("enterprise alignment", "useful context"),
+            ("standard finding", "observation"),
+            ("partially_aligned", "discussed"),
+            ("insufficient_evidence", "discussed"),
+            ("not_applicable", "discussed"),
+            ("alignment score", "progress"),
+        )
+        lower = cleaned
+        for old, new in replacements:
+            # Case-insensitive replace while preserving surrounding text.
+            idx = lower.lower().find(old)
+            while idx >= 0:
+                lower = lower[:idx] + new + lower[idx + len(old) :]
+                idx = lower.lower().find(old, idx + len(new))
+        return lower
 
     def _evidence_blurb(self, assessment: Assessment) -> str:
         snapshot = self.evidence.get_latest_snapshot(assessment.id)
@@ -929,8 +1117,50 @@ class InterviewService:
             parts.append(f"partially covered {', '.join(partial)}")
         text = ", and ".join(parts) + "." if parts else "Limited new coverage from this answer."
         if clarify and analysis.clarification_question:
-            text += f" One clarification will help: {analysis.clarification_question}"
-        return text
+            text += (
+                " One clarification will help: "
+                + self._sanitize_host_narrative(analysis.clarification_question)
+            )
+        # Enterprise statuses/findings stay hidden; only neutral progress language.
+        if analysis.standard_updates:
+            themes = self._neutral_themes_for_standard_updates(analysis.standard_updates)
+            if themes:
+                text += (
+                    " This also provided useful context about your "
+                    + " and ".join(themes)
+                    + "."
+                )
+            else:
+                text += (
+                    " This also provided useful context about your platform and security practices."
+                )
+        return self._sanitize_host_narrative(text)
+
+    def _neutral_themes_for_standard_updates(self, updates: list[Any]) -> list[str]:
+        theme_by_key = {
+            "approved_secret_management": "security practices",
+            "preferred_java_runtime_openshift": "platform practices",
+            "pull_request_quality_gates": "delivery practices",
+            "approved_deployment_automation": "delivery practices",
+            "approved_production_observability": "operations practices",
+        }
+        themes: list[str] = []
+        for update in updates:
+            key = getattr(update, "standard_key", None) or ""
+            theme = theme_by_key.get(key)
+            if theme is None:
+                lower = key.lower()
+                if "secret" in lower or "security" in lower:
+                    theme = "security practices"
+                elif "observ" in lower or "monitor" in lower:
+                    theme = "operations practices"
+                elif "runtime" in lower or "openshift" in lower or "platform" in lower:
+                    theme = "platform practices"
+                else:
+                    theme = "delivery practices"
+            if theme not in themes:
+                themes.append(theme)
+        return themes[:3]
 
     def _practice_name(self, key: str) -> str:
         try:

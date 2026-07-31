@@ -286,6 +286,20 @@ def test_findings_admin_adjust_and_publish(client: TestClient) -> None:
     assert body["enterprise_standards"]["applicable_count"] >= 1
     assert "enterprise_alignment_score" not in json.dumps(body)
     assert "ai_candidate_score" not in json.dumps(body)
+    # Distinct report sections: SAFe score remains independent; plan carries refs.
+    assert isinstance(body["overall_maturity"], (int, float))
+    assert body["improvement_actions"]
+    assert any(
+        item.get("related_practice_keys") is not None
+        and item.get("related_standard_keys") is not None
+        for item in body["improvement_actions"]
+    )
+    # Enterprise-only or merged actions should preserve standard references when present.
+    with_standards = [
+        item for item in body["improvement_actions"] if item.get("related_standard_keys")
+    ]
+    assert with_standards
+    assert all("sources" in item for item in body["improvement_actions"])
 
 
 def test_all_any_condition_behavior() -> None:
@@ -372,18 +386,76 @@ def test_unknown_standard_key_rejected(client: TestClient) -> None:
 
 
 def test_recommendation_dedupe_and_no_enterprise_score() -> None:
-    from app.services.publication import _norm_rec
+    from app.services.publication import _norm_rec, build_consolidated_improvement_plan
 
     assert _norm_rec("The team should adopt Secret Server") == _norm_rec("Adopt Secret Server")
     assert "enterprise_alignment_score" not in _norm_rec("aligned findings")
 
+    plan = build_consolidated_improvement_plan(
+        [
+            {
+                "id": "safe-1",
+                "title": "Require Secret Server for pipeline secrets",
+                "practice_key": "build",
+                "domain_key": "continuous_integration",
+                "observation": "Tokens still appear in variable groups.",
+                "supporting_evidence": "Interview + ADO variables",
+                "why_it_matters": "Credential leakage risk",
+                "recommended_action": "Require Secret Server retrieval for pipeline secrets",
+                "time_horizon": "next_sprint",
+                "kpi": "Secrets retrieved from vault",
+                "priority": 2,
+            }
+        ],
+        [
+            {
+                "stable_key": "approved_secret_management",
+                "standard": "Approved secret management",
+                "requirement_level": "required",
+                "observation": "Builds still reference pipeline variables for some API tokens.",
+                "supporting_evidence": "Demo admin adjustment",
+                "recommendation": (
+                    "Require Secret Server retrieval for runtime and pipeline secrets; "
+                    "remove hardcoded credentials from repositories."
+                ),
+                "related_safe_practices": ["develop", "build", "deploy"],
+                "suggested_time_horizon": "next_sprint",
+            },
+            {
+                "stable_key": "approved_production_observability",
+                "standard": "Approved production observability",
+                "requirement_level": "required",
+                "observation": "Logging onboarding incomplete.",
+                "supporting_evidence": "Interview",
+                "recommendation": "Onboard the service to approved monitoring and logging platforms.",
+                "related_safe_practices": ["monitor", "respond", "stabilize"],
+                "suggested_time_horizon": "next_sprint",
+            },
+        ],
+    )
+    assert len(plan) == 2
+    merged = next(item for item in plan if item["id"] == "safe-1")
+    assert "enterprise" in merged["sources"]
+    assert "approved_secret_management" in merged["related_standard_keys"]
+    assert "Approved secret management" in merged["related_standard_titles"]
+    assert set(merged["related_practice_keys"]) >= {"build", "develop", "deploy"}
+    observability = next(item for item in plan if "observability" in item["id"])
+    assert observability["sources"] == ["enterprise"]
+    assert "monitor" in observability["related_practice_keys"]
 
-def test_combined_enterprise_question_selection(client: TestClient) -> None:
+
+def test_multi_coverage_question_hides_enterprise_status(client: TestClient) -> None:
     db = get_session_factory()()
     try:
         assessment = SeedService(db).seed_demo(publish=False)
+        # Leave mapped practices open so multi-coverage selection can fire.
+        for coverage in assessment.practice_coverages:
+            if coverage.practice_key in {"develop", "build", "deploy", "test_end_to_end"}:
+                coverage.coverage_state = "not_discussed"
         db.commit()
         assessment_id = assessment.id
+        from app.models.enums import StandardFindingStatus
+        from app.schemas.enterprise import StandardUpdateAI
         from app.schemas.interview import InterviewAnalysisAI
         from app.services.interview import InterviewService
 
@@ -391,22 +463,37 @@ def test_combined_enterprise_question_selection(client: TestClient) -> None:
         analysis = InterviewAnalysisAI(
             response_summary="partial answer",
             practice_updates=[],
-            standard_updates=[],
+            standard_updates=[
+                StandardUpdateAI(
+                    standard_key="approved_secret_management",
+                    status=StandardFindingStatus.PARTIALLY_ALIGNED,
+                    evidence_summary="Mentioned vault usage",
+                    confidence=0.6,
+                )
+            ],
             confidence=0.5,
             open_gaps=["missing secret management detail"],
             contradictions=[],
             needs_immediate_clarification=False,
             clarification_question=None,
-            next_best_question="What quality gates run before merge?",
+            next_best_question=(
+                "Walk us through what checks must pass before merge and how credentials "
+                "are provided to builds and deployments."
+            ),
             reason_for_next_question="Need more coverage of build and secret management.",
             overall_coverage_summary="partial",
         )
-        question = service._select_enterprise_combined_question(assessment, analysis)
+        question = service._select_multi_coverage_question(assessment, analysis)
         assert question is not None
-        assert (
-            "enterprise standard" in question["question"].lower()
-            or "Secret" in question["question"]
-        )
+        lowered = (question["question"] + " " + question["why"]).lower()
+        assert "enterprise standard" not in lowered
+        assert "partially_aligned" not in lowered
+        assert "standard finding" not in lowered
+        confirmation = service._coverage_confirmation(analysis)
+        assert "useful context" in confirmation.lower()
+        assert "enterprise standard" not in confirmation.lower()
+        assert "partially_aligned" not in confirmation.lower()
+        assert "aligned" not in confirmation.lower()
         payload = service.enterprise.interview_context_payload(assessment_id)
         assert payload["known_standard_keys"]
     finally:

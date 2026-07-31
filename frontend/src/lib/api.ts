@@ -587,6 +587,10 @@ export type ImprovementAction = {
   time_horizon: string
   kpi: string
   priority: number
+  related_practice_keys?: string[]
+  related_standard_keys?: string[]
+  related_standard_titles?: string[]
+  sources?: string[]
 }
 
 export type ReviewPackage = {
@@ -825,6 +829,27 @@ export function getPublishedResults(assessmentId: string, version?: number) {
 
 export function exportReportUrl(assessmentId: string, version: number, kind: 'pdf' | 'json') {
   return `${API_BASE}/api/assessments/${assessmentId}/results/${version}/export/${kind}`
+}
+
+export type AdminMe = {
+  authenticated: boolean
+  role?: string | null
+  subject?: string | null
+}
+
+export function getAdminMe() {
+  return apiFetch<AdminMe>('/api/auth/admin/me')
+}
+
+export function adminLogin(password: string) {
+  return apiFetch<{ status: string; role?: string | null }>('/api/auth/admin/login', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  })
+}
+
+export function adminLogout() {
+  return apiFetch<{ status: string }>('/api/auth/admin/logout', { method: 'POST' })
 }
 
 export function listEnterpriseStandards(params?: { search?: string; category?: string; active?: boolean }) {

@@ -18,14 +18,27 @@ function ActionCard({ item, horizon, dark }: { item: ImprovementAction; horizon:
     'Longer term': { bg: dark ? '#3b2409' : '#fef3c7', color: '#d97706' },
   }
   const hs = horizonStyles[horizon]
+  const practices = item.related_practice_keys?.length
+    ? item.related_practice_keys
+    : item.practice_key
+      ? [item.practice_key]
+      : []
+  const standards = item.related_standard_titles?.length
+    ? item.related_standard_titles
+    : item.related_standard_keys || []
 
   return (
     <div className="rounded-xl p-5 print:break-inside-avoid" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className="text-xs px-2.5 py-1 rounded-full font-semibold" style={{ background: hs.bg, color: hs.color }}>
           {horizon}
         </span>
-        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{item.practice_key}</span>
+        {(item.sources || []).includes('safe') && (
+          <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>SAFe</span>
+        )}
+        {(item.sources || []).includes('enterprise') && (
+          <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: dark ? '#0f1d40' : '#eef3fa', color: 'var(--primary)' }}>Enterprise</span>
+        )}
       </div>
       <h3 className="font-semibold text-sm mb-2" style={{ color: 'var(--foreground)' }}>{item.title}</h3>
       <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>{item.observation}</p>
@@ -35,18 +48,35 @@ function ActionCard({ item, horizon, dark }: { item: ImprovementAction; horizon:
       </div>
       <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>Why it matters: {item.why_it_matters}</p>
       <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>Evidence: {item.supporting_evidence}</p>
-      <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-        <TrendingUp size={12} />
-        <span>KPI: {item.kpi}</span>
-      </div>
+      <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>
+        Related SAFe practices: {practices.join(', ') || '—'}
+      </p>
+      <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>
+        Related enterprise standards: {standards.join(', ') || '—'}
+      </p>
+      {item.kpi && (
+        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+          <TrendingUp size={12} />
+          <span>KPI: {item.kpi}</span>
+        </div>
+      )}
     </div>
   )
 }
 
 function horizonLabel(value: string) {
-  if (value === 'ninety_days') return '90 days'
+  if (value === 'ninety_days' || value === 'this_pi' || value === 'next_90_days') return '90 days'
   if (value === 'longer_term') return 'Longer term'
   return 'Next sprint'
+}
+
+function SectionHeading({ number, title }: { number: string; title: string }) {
+  return (
+    <div className="flex items-baseline gap-3 mb-4">
+      <span className="text-xs font-semibold tracking-widest" style={{ color: 'var(--muted-foreground)' }}>{number}</span>
+      <h2 className="font-semibold text-base" style={{ color: 'var(--foreground)' }}>{title}</h2>
+    </div>
+  )
 }
 
 export default function Results({ dark, onNavigate, assessmentId }: Props) {
@@ -81,9 +111,10 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
   }
 
   const nextSprint = results.improvement_actions.filter(a => a.time_horizon === 'next_sprint')
-  const ninety = results.improvement_actions.filter(a => a.time_horizon === 'ninety_days')
+  const ninety = results.improvement_actions.filter(a => ['ninety_days', 'this_pi', 'next_90_days'].includes(a.time_horizon))
   const longer = results.improvement_actions.filter(a => a.time_horizon === 'longer_term')
   const kpis = Array.from(new Set(results.improvement_actions.map(a => a.kpi).filter(Boolean)))
+  const enterprise = results.enterprise_standards
 
   return (
     <div className="min-h-screen print:bg-white" style={{ background: 'var(--background)' }}>
@@ -112,7 +143,7 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
               </p>
               <div className="flex flex-wrap gap-4">
                 <div>
-                  <div className="text-sm mb-1" style={{ color: 'rgba(255,255,255,0.55)' }}>Overall maturity</div>
+                  <div className="text-sm mb-1" style={{ color: 'rgba(255,255,255,0.55)' }}>SAFe overall maturity</div>
                   <div className="text-3xl font-semibold font-mono" style={{ color: '#fff' }}>
                     {results.overall_maturity.toFixed(1)} <span style={{ fontSize: 16, color: 'rgba(255,255,255,0.5)' }}>/ 5.0</span>
                   </div>
@@ -154,24 +185,28 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-5 mb-8">
-          <div className="rounded-xl p-5" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
-            <p className="text-xs font-semibold uppercase tracking-widest mb-5" style={{ color: 'var(--muted-foreground)' }}>
-              Four-domain radar
-            </p>
-            <RadarChart dark={dark} data={results.radar} summary={results.chart_summary} />
+        <section className="mb-10">
+          <SectionHeading number="01" title="SAFe DevOps Maturity" />
+          <p className="text-sm mb-5" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
+            SAFe maturity scores reflect practice coverage only. Enterprise standards findings do not change this score.
+          </p>
+          <div className="grid md:grid-cols-2 gap-5 mb-6">
+            <div className="rounded-xl p-5" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-5" style={{ color: 'var(--muted-foreground)' }}>
+                Four-domain radar
+              </p>
+              <RadarChart dark={dark} data={results.radar} summary={results.chart_summary} />
+            </div>
+            <div className="rounded-xl p-5" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-5" style={{ color: 'var(--muted-foreground)' }}>
+                Sixteen-practice heatmap
+              </p>
+              <HeatmapChart dark={dark} cells={results.heatmap} summary={results.chart_summary} />
+            </div>
           </div>
-          <div className="rounded-xl p-5" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
-            <p className="text-xs font-semibold uppercase tracking-widest mb-5" style={{ color: 'var(--muted-foreground)' }}>
-              Sixteen-practice heatmap
-            </p>
-            <HeatmapChart dark={dark} cells={results.heatmap} summary={results.chart_summary} />
-          </div>
-        </div>
 
-        <section className="mb-8">
-          <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>Strengths</h2>
-          <div className="space-y-2.5">
+          <h3 className="font-semibold text-sm mb-3" style={{ color: 'var(--foreground)' }}>Strengths</h3>
+          <div className="space-y-2.5 mb-6">
             {results.strengths.map(s => (
               <div key={s} className="rounded-xl px-4 py-3.5 flex items-start gap-3" style={{ background: dark ? '#092b20' : '#d1fae5', border: `1px solid ${dark ? '#065f46' : '#6ee7b7'}` }}>
                 <div className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: '#10b981' }} />
@@ -179,11 +214,9 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
               </div>
             ))}
           </div>
-        </section>
 
-        <section className="mb-8">
-          <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>Highest-value improvement opportunities</h2>
-          <div className="space-y-2.5">
+          <h3 className="font-semibold text-sm mb-3" style={{ color: 'var(--foreground)' }}>Highest-value improvement opportunities</h3>
+          <div className="space-y-2.5 mb-6">
             {results.maturity_gaps.map(o => (
               <div key={o} className="rounded-xl px-4 py-3.5 flex items-start gap-3" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
                 <ArrowRight size={14} style={{ color: '#f59e0b', marginTop: 2, flexShrink: 0 }} />
@@ -191,10 +224,8 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
               </div>
             ))}
           </div>
-        </section>
 
-        <section className="mb-8">
-          <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>Evidence limitations</h2>
+          <h3 className="font-semibold text-sm mb-3" style={{ color: 'var(--foreground)' }}>Evidence limitations</h3>
           <div className="space-y-2">
             {results.evidence_limitations.map(lim => (
               <p key={lim} className="text-sm rounded-lg px-3 py-2" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', lineHeight: 1.6 }}>
@@ -204,76 +235,95 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
           </div>
         </section>
 
-        {results.enterprise_standards && (
-          <section className="mb-8">
-            <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>Enterprise Standards</h2>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-              {[
-                { label: 'Applicable', value: results.enterprise_standards.applicable_count },
-                { label: 'Aligned', value: results.enterprise_standards.aligned_count },
-                { label: 'Partial', value: results.enterprise_standards.partially_aligned_count },
-                { label: 'Findings', value: results.enterprise_standards.finding_count },
-                { label: 'Insufficient evidence', value: results.enterprise_standards.insufficient_evidence_count },
-              ].map(m => (
-                <div key={m.label} className="rounded-xl p-3" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
-                  <div className="text-[11px] mb-1" style={{ color: 'var(--muted-foreground)' }}>{m.label}</div>
-                  <div className="text-lg font-semibold font-mono" style={{ color: 'var(--foreground)' }}>{m.value}</div>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-3">
-              {Object.entries(results.enterprise_standards.findings_by_category || {}).map(([category, cards]) => (
-                <div key={category}>
-                  <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--muted-foreground)' }}>{category}</p>
-                  <div className="space-y-3">
-                    {cards.filter(c => c.status === 'finding' || c.status === 'partially_aligned' || c.status === 'insufficient_evidence').map(card => (
-                      <div key={card.stable_key} className="rounded-xl p-4" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
-                        <div className="flex items-center gap-2 mb-2 flex-wrap">
-                          <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{card.standard}</p>
-                          <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: dark ? '#0f1d40' : '#eef3fa', color: 'var(--primary)' }}>{card.requirement_level}</span>
-                          <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>{card.status.split('_').join(' ')}</span>
-                        </div>
-                        <p className="text-sm mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>{card.observation || '—'}</p>
-                        <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>Evidence: {card.supporting_evidence || '—'}</p>
-                        <div className="rounded-lg p-3 mb-2" style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}>
-                          <p className="text-xs font-semibold mb-1" style={{ color: 'var(--foreground)' }}>Recommendation</p>
-                          <p className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>{card.recommendation || '—'}</p>
-                        </div>
-                        <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                          Related SAFe: {(card.related_safe_practices || []).join(', ') || '—'} · Horizon: {horizonLabel(card.suggested_time_horizon || 'next_sprint')}
-                        </p>
-                      </div>
-                    ))}
+        <section className="mb-10">
+          <SectionHeading number="02" title="Enterprise Standards Findings" />
+          <p className="text-sm mb-5" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
+            Applicable enterprise standards and findings. These enrich recommendations and do not alter the SAFe maturity score.
+          </p>
+          {enterprise ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                {[
+                  { label: 'Applicable', value: enterprise.applicable_count },
+                  { label: 'Aligned', value: enterprise.aligned_count },
+                  { label: 'Partial', value: enterprise.partially_aligned_count },
+                  { label: 'Findings', value: enterprise.finding_count },
+                  { label: 'Insufficient evidence', value: enterprise.insufficient_evidence_count },
+                ].map(m => (
+                  <div key={m.label} className="rounded-xl p-3" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+                    <div className="text-[11px] mb-1" style={{ color: 'var(--muted-foreground)' }}>{m.label}</div>
+                    <div className="text-lg font-semibold font-mono" style={{ color: 'var(--foreground)' }}>{m.value}</div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+              <div className="space-y-3">
+                {Object.entries(enterprise.findings_by_category || {}).map(([category, cards]) => (
+                  <div key={category}>
+                    <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--muted-foreground)' }}>{category}</p>
+                    <div className="space-y-3">
+                      {cards.map(card => (
+                        <div key={card.stable_key} className="rounded-xl p-4" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{card.standard}</p>
+                            <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: dark ? '#0f1d40' : '#eef3fa', color: 'var(--primary)' }}>{card.requirement_level}</span>
+                            <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>{card.status.split('_').join(' ')}</span>
+                          </div>
+                          <p className="text-sm mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>{card.observation || '—'}</p>
+                          <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>Evidence: {card.supporting_evidence || '—'}</p>
+                          {(card.status === 'finding' || card.status === 'partially_aligned' || card.status === 'insufficient_evidence') && (
+                            <div className="rounded-lg p-3 mb-2" style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}>
+                              <p className="text-xs font-semibold mb-1" style={{ color: 'var(--foreground)' }}>Recommendation</p>
+                              <p className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>{card.recommendation || '—'}</p>
+                            </div>
+                          )}
+                          <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                            Related SAFe: {(card.related_safe_practices || []).join(', ') || '—'} · Horizon: {horizonLabel(card.suggested_time_horizon || 'next_sprint')}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="rounded-xl p-4 text-sm" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}`, color: 'var(--muted-foreground)' }}>
+              No enterprise standards were applicable for this assessment.
             </div>
-          </section>
-        )}
+          )}
+        </section>
 
         <section className="mb-8">
-          <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>Improvement plan</h2>
+          <SectionHeading number="03" title="Consolidated Improvement Plan" />
+          <p className="text-sm mb-5" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
+            Overlapping SAFe and enterprise recommendations are merged into a single action, with all related practice and standard references preserved.
+          </p>
           <div className="space-y-4">
             {nextSprint.map(item => <ActionCard key={item.id} item={item} horizon={horizonLabel(item.time_horizon)} dark={dark} />)}
             {ninety.map(item => <ActionCard key={item.id} item={item} horizon={horizonLabel(item.time_horizon)} dark={dark} />)}
             {longer.map(item => <ActionCard key={item.id} item={item} horizon={horizonLabel(item.time_horizon)} dark={dark} />)}
+            {!results.improvement_actions.length && (
+              <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>No improvement actions were published.</p>
+            )}
           </div>
         </section>
 
-        <section className="mb-8">
-          <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>KPIs to monitor</h2>
-          <div className="flex flex-wrap gap-2">
-            {kpis.map(kpi => (
-              <span
-                key={kpi}
-                className="text-xs px-3 py-1.5 rounded-full font-medium"
-                style={{ background: dark ? '#0f1d40' : '#eef3fa', color: 'var(--primary)', border: `1px solid ${dark ? '#1e3358' : '#b0c7e6'}` }}
-              >
-                {kpi}
-              </span>
-            ))}
-          </div>
-        </section>
+        {kpis.length > 0 && (
+          <section className="mb-8">
+            <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>KPIs to monitor</h2>
+            <div className="flex flex-wrap gap-2">
+              {kpis.map(kpi => (
+                <span
+                  key={kpi}
+                  className="text-xs px-3 py-1.5 rounded-full font-medium"
+                  style={{ background: dark ? '#0f1d40' : '#eef3fa', color: 'var(--primary)', border: `1px solid ${dark ? '#1e3358' : '#b0c7e6'}` }}
+                >
+                  {kpi}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
 
         <div className="rounded-xl p-5 flex items-center justify-between flex-wrap gap-3 print:hidden" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
           <div>

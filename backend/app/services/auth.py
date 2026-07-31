@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+
 from fastapi import Response
 
 from app.core.config import Settings, get_settings
@@ -16,13 +18,34 @@ class AdminAuthService:
         self.settings = settings or get_settings()
 
     def login(self, password: str, response: Response) -> dict[str, str]:
-        if not self.settings.admin_password_hash:
+        """Authenticate admin with ADMIN_PASSWORD_HASH and/or APP_SECRET_KEY.
+
+        Light login: the shared APP_SECRET_KEY value is accepted as the admin secret
+        when configured. A dedicated ADMIN_PASSWORD_HASH remains supported and preferred
+        when both are present (either may succeed).
+        """
+        password = (password or "").strip()
+        if not password:
+            raise AppError(
+                code="invalid_credentials", message="Invalid credentials", status_code=401
+            )
+
+        hash_ok = bool(self.settings.admin_password_hash) and verify_password(
+            password, self.settings.admin_password_hash
+        )
+        secret = (self.settings.app_secret_key or "").strip()
+        # compare_digest requires equal-length strings; mismatched length is simply not a match.
+        secret_ok = bool(secret) and len(password) == len(secret) and secrets.compare_digest(
+            password, secret
+        )
+
+        if not self.settings.admin_password_hash and not secret:
             raise AppError(
                 code="admin_not_configured",
-                message="Admin password hash is not configured",
+                message="Admin login is not configured (set APP_SECRET_KEY or ADMIN_PASSWORD_HASH)",
                 status_code=503,
             )
-        if not verify_password(password, self.settings.admin_password_hash):
+        if not (hash_ok or secret_ok):
             raise AppError(
                 code="invalid_credentials", message="Invalid credentials", status_code=401
             )

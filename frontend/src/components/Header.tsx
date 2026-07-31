@@ -1,4 +1,4 @@
-import { Sun, Moon, HelpCircle, LogOut, ChevronDown, Save } from 'lucide-react'
+import { Sun, Moon, HelpCircle, LogOut, Save } from 'lucide-react'
 import type { Screen } from '../types'
 
 interface HeaderProps {
@@ -8,6 +8,7 @@ interface HeaderProps {
   assessmentName?: string
   onNavigate: (s: Screen) => void
   onSaveExit?: () => void
+  onLogout?: () => void
 }
 
 const statusLabels: Partial<Record<Screen, string>> = {
@@ -18,7 +19,7 @@ const statusLabels: Partial<Record<Screen, string>> = {
   evidence: 'Setup',
 }
 
-export default function Header({ dark, onToggleDark, screen, assessmentName, onNavigate, onSaveExit }: HeaderProps) {
+export default function Header({ dark, onToggleDark, screen, assessmentName, onNavigate, onSaveExit, onLogout }: HeaderProps) {
   const showAssessment = assessmentName && !['welcome', 'integrations', 'ai-settings', 'enterprise-standards'].includes(screen)
   const statusLabel = statusLabels[screen]
 
@@ -118,22 +119,19 @@ export default function Header({ dark, onToggleDark, screen, assessmentName, onN
         >
           {dark ? <Sun size={17} /> : <Moon size={17} />}
         </button>
-        <div className="relative ml-1">
+        {onLogout && (
           <button
-            className="flex items-center gap-1.5 px-2 py-1.5 rounded transition-base text-sm"
-            style={{ color: 'var(--foreground)' }}
+            onClick={onLogout}
+            className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded transition-base ml-1"
+            style={{ color: 'var(--muted-foreground)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            title="Sign out"
           >
-            <div
-              className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold"
-              style={{ background: 'var(--primary)', color: '#fff' }}
-            >
-              JM
-            </div>
-            <ChevronDown size={13} style={{ color: 'var(--muted-foreground)' }} />
+            <LogOut size={15} />
+            <span className="hidden sm:inline">Sign out</span>
           </button>
-        </div>
+        )}
       </div>
     </header>
   )

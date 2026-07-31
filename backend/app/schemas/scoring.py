@@ -90,6 +90,10 @@ class ImprovementActionOut(StrictSchema):
     time_horizon: str
     kpi: str
     priority: int
+    related_practice_keys: list[str] = Field(default_factory=list)
+    related_standard_keys: list[str] = Field(default_factory=list)
+    related_standard_titles: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
 
 
 class DomainRadarPoint(StrictSchema):

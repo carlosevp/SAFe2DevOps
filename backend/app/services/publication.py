@@ -43,6 +43,132 @@ def _norm_rec(text: str) -> str:
     return cleaned.strip()
 
 
+def _token_set(text: str) -> set[str]:
+    return {tok for tok in _norm_rec(text).split() if len(tok) > 2}
+
+
+def _recs_overlap(a: str, b: str) -> bool:
+    """True when recommendations describe the same underlying action."""
+    na, nb = _norm_rec(a), _norm_rec(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    if na in nb or nb in na:
+        return True
+    ta, tb = _token_set(a), _token_set(b)
+    if not ta or not tb:
+        return False
+    overlap = len(ta & tb)
+    union = len(ta | tb)
+    return overlap >= 3 and (overlap / union) >= 0.45
+
+
+def build_consolidated_improvement_plan(
+    safe_actions: list[dict],
+    enterprise_cards: list[dict],
+) -> list[dict]:
+    """Merge overlapping SAFe and enterprise recommendations into single actions.
+
+    Preserves related practice and standard references. Enterprise findings never
+    change SAFe maturity scores; this only consolidates recommended actions.
+    """
+    plan: list[dict] = []
+    for action in safe_actions:
+        practice_keys = []
+        if action.get("practice_key"):
+            practice_keys.append(str(action["practice_key"]))
+        plan.append(
+            {
+                **action,
+                "related_practice_keys": practice_keys,
+                "related_standard_keys": [],
+                "related_standard_titles": [],
+                "sources": ["safe"],
+            }
+        )
+
+    for card in enterprise_cards:
+        rec = (card.get("recommendation") or "").strip()
+        if not rec:
+            continue
+        standard_key = str(card.get("stable_key") or "")
+        standard_title = str(card.get("standard") or standard_key or "Enterprise standard")
+        practice_keys = [str(p) for p in (card.get("related_safe_practices") or []) if p]
+        merged = False
+        for item in plan:
+            existing_rec = item.get("recommended_action") or item.get("title") or ""
+            shared_practice = bool(
+                set(item.get("related_practice_keys") or []) & set(practice_keys)
+            )
+            soft_overlap = (
+                shared_practice
+                and len(_token_set(existing_rec) & _token_set(rec)) >= 2
+            )
+            if _recs_overlap(existing_rec, rec) or soft_overlap:
+                # Merge into existing action; keep the richer recommendation text.
+                if len(rec) > len(existing_rec):
+                    item["recommended_action"] = rec
+                if card.get("observation") and card.get("observation") not in (
+                    item.get("observation") or ""
+                ):
+                    base = (item.get("observation") or "").strip()
+                    item["observation"] = (
+                        f"{base} {card['observation']}".strip() if base else card["observation"]
+                    )
+                if card.get("supporting_evidence"):
+                    evidence = item.get("supporting_evidence") or ""
+                    extra = card["supporting_evidence"]
+                    if extra and extra not in evidence:
+                        item["supporting_evidence"] = (
+                            f"{evidence}; {extra}".strip("; ") if evidence else extra
+                        )
+                for pk in practice_keys:
+                    if pk not in item["related_practice_keys"]:
+                        item["related_practice_keys"].append(pk)
+                if standard_key and standard_key not in item["related_standard_keys"]:
+                    item["related_standard_keys"].append(standard_key)
+                if standard_title and standard_title not in item["related_standard_titles"]:
+                    item["related_standard_titles"].append(standard_title)
+                if "enterprise" not in item["sources"]:
+                    item["sources"].append("enterprise")
+                if not item.get("practice_key") and practice_keys:
+                    item["practice_key"] = practice_keys[0]
+                # Prefer earlier/urgent horizon when merging.
+                card_horizon = card.get("suggested_time_horizon") or "next_sprint"
+                horizon_rank = {"next_sprint": 0, "ninety_days": 1, "longer_term": 2, "this_pi": 1}
+                if horizon_rank.get(card_horizon, 9) < horizon_rank.get(
+                    item.get("time_horizon") or "next_sprint", 9
+                ):
+                    item["time_horizon"] = card_horizon
+                if card.get("requirement_level") == "required":
+                    item["priority"] = min(int(item.get("priority") or 3), 2)
+                merged = True
+                break
+        if merged:
+            continue
+        plan.append(
+            {
+                "id": f"enterprise-{standard_key or len(plan)}",
+                "title": standard_title,
+                "practice_key": practice_keys[0] if practice_keys else None,
+                "domain_key": None,
+                "observation": card.get("observation") or "",
+                "supporting_evidence": card.get("supporting_evidence") or "",
+                "why_it_matters": f"Enterprise standard ({card.get('requirement_level') or 'preferred'})",
+                "recommended_action": rec,
+                "time_horizon": card.get("suggested_time_horizon") or "next_sprint",
+                "kpi": "",
+                "priority": 2 if card.get("requirement_level") == "required" else 3,
+                "related_practice_keys": practice_keys,
+                "related_standard_keys": [standard_key] if standard_key else [],
+                "related_standard_titles": [standard_title],
+                "sources": ["enterprise"],
+            }
+        )
+    return plan
+
+
 class PublicationService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -112,8 +238,9 @@ class PublicationService:
             f"{sum(1 for s in scores.values() if s >= 2.0)} practices assessed."
         )
 
+        # Enterprise findings are published separately and never alter SAFe scores.
         enterprise = self.enterprise.published_section(assessment_id)
-        improvement_plan = [
+        safe_actions = [
             {
                 "id": action.id,
                 "title": action.title,
@@ -129,30 +256,10 @@ class PublicationService:
             }
             for action in assessment.improvement_actions
         ]
-        existing_norm = {
-            _norm_rec(item.get("recommended_action") or item.get("title") or "")
-            for item in improvement_plan
-        }
-        for card in enterprise.get("recommendation_cards") or []:
-            rec = card.get("recommendation") or ""
-            if not rec or _norm_rec(rec) in existing_norm:
-                continue
-            improvement_plan.append(
-                {
-                    "id": f"enterprise-{card.get('stable_key')}",
-                    "title": card.get("standard") or "Enterprise standard",
-                    "practice_key": (card.get("related_safe_practices") or [None])[0],
-                    "domain_key": None,
-                    "observation": card.get("observation") or "",
-                    "supporting_evidence": card.get("supporting_evidence") or "",
-                    "why_it_matters": f"Enterprise standard ({card.get('requirement_level')})",
-                    "recommended_action": rec,
-                    "time_horizon": card.get("suggested_time_horizon") or "next_sprint",
-                    "kpi": "",
-                    "priority": 2 if card.get("requirement_level") == "required" else 3,
-                }
-            )
-            existing_norm.add(_norm_rec(rec))
+        improvement_plan = build_consolidated_improvement_plan(
+            safe_actions,
+            list(enterprise.get("recommendation_cards") or []),
+        )
 
         version = self.publications.next_version(assessment_id)
         report = PublishedReport(
@@ -231,6 +338,8 @@ class PublicationService:
         pdf_lines = [
             report.title,
             f"Version {version} · Published {report.published_at.date().isoformat()}",
+            "",
+            "1. SAFe DevOps Maturity",
             f"Overall maturity: {report.overall_maturity}/5.0",
             f"Confidence: {report.confidence_summary}",
             f"Evidence quality: {report.evidence_quality}",
@@ -248,7 +357,7 @@ class PublicationService:
             "",
             chart_summary,
             "",
-            "Enterprise standards:",
+            "2. Enterprise Standards Findings",
             (
                 f"- Applicable {enterprise.get('applicable_count', 0)}; "
                 f"aligned {enterprise.get('aligned_count', 0)}; "
@@ -256,11 +365,28 @@ class PublicationService:
                 f"findings {enterprise.get('finding_count', 0)}; "
                 f"insufficient evidence {enterprise.get('insufficient_evidence_count', 0)}"
             ),
-            *[
-                f"- {card.get('standard')}: {card.get('recommendation')}"
-                for card in (enterprise.get("recommendation_cards") or [])[:8]
-            ],
+            "Enterprise findings do not alter the SAFe maturity score.",
         ]
+        for card in (enterprise.get("recommendation_cards") or [])[:8]:
+            pdf_lines.append(
+                f"- {card.get('standard')} ({card.get('requirement_level')}, {card.get('status')}): "
+                f"{card.get('observation') or card.get('recommendation')}"
+            )
+        pdf_lines.extend(["", "3. Consolidated Improvement Plan"])
+        for item in improvement_plan[:12]:
+            practices = ", ".join(item.get("related_practice_keys") or []) or "-"
+            standards = (
+                ", ".join(
+                    item.get("related_standard_titles")
+                    or item.get("related_standard_keys")
+                    or []
+                )
+                or "-"
+            )
+            pdf_lines.append(
+                f"- {item.get('title')}: {item.get('recommended_action')} "
+                f"[practices: {practices}; standards: {standards}]"
+            )
         report.export_pdf_relpath = write_pdf_export(
             self.storage, assessment_id, version, pdf_lines
         )
@@ -304,6 +430,12 @@ class PublicationService:
                 time_horizon=item.get("time_horizon") or "next_sprint",
                 kpi=item.get("kpi") or "",
                 priority=int(item.get("priority") or 3),
+                related_practice_keys=list(item.get("related_practice_keys") or (
+                    [item["practice_key"]] if item.get("practice_key") else []
+                )),
+                related_standard_keys=list(item.get("related_standard_keys") or []),
+                related_standard_titles=list(item.get("related_standard_titles") or []),
+                sources=list(item.get("sources") or ["safe"]),
             )
             for idx, item in enumerate(json.loads(report.improvement_plan_json or "[]"))
         ]

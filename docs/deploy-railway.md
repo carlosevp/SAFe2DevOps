@@ -36,9 +36,9 @@ Set `DATA_DIR=/data`. Do not write application data outside `/data` (temporary f
 | --- | --- | --- |
 | `DATA_DIR` | yes | `/data` |
 | `APP_ENV` | yes | `production` |
-| `APP_SECRET_KEY` | yes | long random secret |
+| `APP_SECRET_KEY` | yes | long random secret; also used as the admin login secret |
 | `DATA_ENCRYPTION_KEY` | yes | long random secret |
-| `ADMIN_PASSWORD_HASH` | yes | from `scripts/hash_admin_password.py` |
+| `ADMIN_PASSWORD_HASH` | optional | bcrypt hash from `scripts/hash_admin_password.py` (also accepted at login) |
 | `PORT` | platform | use Railway-provided `PORT` |
 | `CORS_ORIGINS` | recommended | public Railway URL |
 | `PUBLIC_BASE_URL` | recommended | public Railway URL |

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Header from './components/Header'
 import Welcome from './screens/Welcome'
 import Integrations from './screens/Integrations'
@@ -11,9 +11,25 @@ import AdminReview from './screens/AdminReview'
 import Results from './screens/Results'
 import AISettings from './screens/AISettings'
 import EnterpriseStandards from './screens/EnterpriseStandards'
+import AdminLogin from './screens/AdminLogin'
+import { adminLogout, getAdminMe } from './lib/api'
 import type { Screen } from './types'
 
 const ASSESSMENT_SCREENS: Screen[] = ['setup', 'evidence', 'workshop', 'checkpoint', 'admin-review', 'results']
+
+/** Screens that require an authenticated admin session. */
+const ADMIN_PROTECTED_SCREENS: Screen[] = [
+  'welcome',
+  'integrations',
+  'setup',
+  'evidence',
+  'workshop',
+  'checkpoint',
+  'admin-review',
+  'results',
+  'ai-settings',
+  'enterprise-standards',
+]
 
 function readInviteToken(): string | null {
   const params = new URLSearchParams(window.location.search)
@@ -26,6 +42,9 @@ export default function App() {
   const [dark, setDark] = useState(false)
   const [assessmentId, setAssessmentId] = useState<string | null>(null)
   const [assessmentName, setAssessmentName] = useState('Claims Integration')
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authenticated, setAuthenticated] = useState(false)
+  const [pendingScreen, setPendingScreen] = useState<Screen | null>(null)
 
   useEffect(() => {
     if (dark) {
@@ -35,10 +54,39 @@ export default function App() {
     }
   }, [dark])
 
+  useEffect(() => {
+    if (inviteToken) {
+      setAuthChecked(true)
+      return
+    }
+    getAdminMe()
+      .then(me => setAuthenticated(Boolean(me.authenticated)))
+      .catch(() => setAuthenticated(false))
+      .finally(() => setAuthChecked(true))
+  }, [inviteToken])
+
+  const navigateProtected = useCallback((next: Screen) => {
+    if (ADMIN_PROTECTED_SCREENS.includes(next) && !authenticated) {
+      setPendingScreen(next)
+      return
+    }
+    setScreen(next)
+  }, [authenticated])
+
+  async function handleLogout() {
+    try {
+      await adminLogout()
+    } catch {
+      // Still clear local auth state.
+    }
+    setAuthenticated(false)
+    setPendingScreen(null)
+    setScreen('welcome')
+  }
+
   const headerAssessmentName = ASSESSMENT_SCREENS.includes(screen) ? assessmentName : undefined
   const isRemote = screen === 'remote-contributor' || Boolean(inviteToken)
 
-  // Remote contributor has its own minimal layout
   if (isRemote) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--background)', color: 'var(--foreground)' }}>
@@ -47,7 +95,29 @@ export default function App() {
     )
   }
 
-  // Checkpoint renders as an overlay on top of workshop
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--background)', color: 'var(--muted-foreground)' }}>
+        Checking admin session…
+      </div>
+    )
+  }
+
+  if (!authenticated) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--background)', color: 'var(--foreground)' }}>
+        <AdminLogin
+          dark={dark}
+          onAuthenticated={() => {
+            setAuthenticated(true)
+            setScreen(pendingScreen || 'welcome')
+            setPendingScreen(null)
+          }}
+        />
+      </div>
+    )
+  }
+
   const showCheckpoint = screen === 'checkpoint'
 
   return (
@@ -57,20 +127,21 @@ export default function App() {
         onToggleDark={() => setDark(d => !d)}
         screen={screen}
         assessmentName={headerAssessmentName}
-        onNavigate={setScreen}
+        onNavigate={navigateProtected}
         onSaveExit={() => setScreen('welcome')}
+        onLogout={() => void handleLogout()}
       />
 
       {screen === 'welcome' && (
-        <Welcome dark={dark} onNavigate={setScreen} />
+        <Welcome dark={dark} onNavigate={navigateProtected} />
       )}
       {screen === 'integrations' && (
-        <Integrations dark={dark} onNavigate={setScreen} />
+        <Integrations dark={dark} onNavigate={navigateProtected} />
       )}
       {screen === 'setup' && (
         <SetupWizard
           dark={dark}
-          onNavigate={setScreen}
+          onNavigate={navigateProtected}
           onAssessmentReady={(id, name) => {
             setAssessmentId(id)
             setAssessmentName(name)
@@ -80,44 +151,31 @@ export default function App() {
       {screen === 'evidence' && (
         <EvidencePreview
           dark={dark}
-          onNavigate={setScreen}
+          onNavigate={navigateProtected}
           assessmentId={assessmentId}
           assessmentName={assessmentName}
         />
       )}
       {(screen === 'workshop' || screen === 'checkpoint') && (
         <div style={{ position: 'relative' }}>
-          <WorkshopRoom dark={dark} onNavigate={setScreen} assessmentId={assessmentId} />
+          <WorkshopRoom dark={dark} onNavigate={navigateProtected} assessmentId={assessmentId} />
           {showCheckpoint && (
-            <Checkpoint dark={dark} onNavigate={setScreen} assessmentId={assessmentId} />
+            <Checkpoint dark={dark} onNavigate={navigateProtected} assessmentId={assessmentId} />
           )}
         </div>
       )}
       {screen === 'admin-review' && (
-        <AdminReview dark={dark} onNavigate={setScreen} assessmentId={assessmentId} />
+        <AdminReview dark={dark} onNavigate={navigateProtected} assessmentId={assessmentId} />
       )}
       {screen === 'results' && (
-        <Results dark={dark} onNavigate={setScreen} assessmentId={assessmentId} />
+        <Results dark={dark} onNavigate={navigateProtected} assessmentId={assessmentId} />
       )}
       {screen === 'ai-settings' && (
-        <AISettings dark={dark} onNavigate={setScreen} />
+        <AISettings dark={dark} onNavigate={navigateProtected} />
       )}
       {screen === 'enterprise-standards' && (
-        <EnterpriseStandards dark={dark} onNavigate={setScreen} />
+        <EnterpriseStandards dark={dark} onNavigate={navigateProtected} />
       )}
-
-      {/* Toast for dark mode indication */}
-      <div
-        className="fixed bottom-5 right-5 z-50 pointer-events-none"
-        style={{ display: 'none' }}
-      >
-        <div
-          className="rounded-xl px-4 py-3 text-sm font-medium shadow-lg"
-          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-        >
-          {dark ? 'Dark mode enabled' : 'Light mode enabled'}
-        </div>
-      </div>
     </div>
   )
 }
