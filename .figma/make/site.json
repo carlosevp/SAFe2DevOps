@@ -1,0 +1,10 @@
+{
+  "description": "Facilitates adaptive SAFe DevOps maturity assessments by combining team conversations with Jira and Azure DevOps evidence for actionable insights.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
