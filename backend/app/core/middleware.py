@@ -59,6 +59,26 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _normalize_origin(value: str) -> str:
+    parsed = urlparse(value.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return value.strip().rstrip("/")
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
+def _request_public_origin(request: Request) -> str:
+    """Best-effort public origin, including reverse-proxy forwarded headers."""
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http")
+    proto = proto.split(",")[0].strip() or "http"
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.netloc
+    )
+    host = host.split(",")[0].strip()
+    return _normalize_origin(f"{proto}://{host}")
+
+
 class CsrfOriginMiddleware(BaseHTTPMiddleware):
     """Reject cross-site cookie-authenticated mutating API calls when Origin is present."""
 
@@ -103,12 +123,17 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        allowed = set(settings.cors_origin_list)
+        origin_base = _normalize_origin(origin)
+        allowed = {_normalize_origin(item) for item in settings.cors_origin_list}
         if settings.public_base_url:
-            allowed.add(settings.public_base_url.rstrip("/"))
-        parsed = urlparse(origin)
-        origin_base = f"{parsed.scheme}://{parsed.netloc}"
-        if origin_base not in allowed and origin not in allowed:
+            allowed.add(_normalize_origin(settings.public_base_url))
+        # Combined frontend/backend deploys (Railway) are same-origin even when
+        # CORS_ORIGINS still lists localhost defaults.
+        allowed.add(_request_public_origin(request))
+        if request.url.netloc:
+            allowed.add(_normalize_origin(f"{request.url.scheme}://{request.url.netloc}"))
+
+        if origin_base not in allowed:
             return JSONResponse(
                 status_code=403,
                 content={

@@ -70,3 +70,52 @@ def test_csrf_rejects_cross_site_fetch_header(client: TestClient, admin_password
         headers={"Sec-Fetch-Site": "cross-site"},
     )
     assert hostile.status_code == 403
+
+
+def test_csrf_allows_same_origin_even_without_cors_entry(
+    client: TestClient, admin_password: str
+) -> None:
+    """Railway serves SPA + API together; Origin is the public host, not localhost CORS defaults."""
+    rate_limiter._events.clear()  # noqa: SLF001
+    login = client.post("/api/auth/admin/login", json={"password": admin_password})
+    assert login.status_code == 200
+    ok = client.post(
+        "/api/assessments",
+        json={
+            "team_name": "Claims",
+            "product_service_name": "API",
+            "owner_name": "Owner",
+            "owner_email": "owner@example.com",
+            "lookback_days": 90,
+        },
+        headers={
+            "Origin": "http://testserver",
+            "Sec-Fetch-Site": "same-origin",
+        },
+    )
+    assert ok.status_code == 200, ok.text
+
+
+def test_csrf_allows_forwarded_public_origin(
+    client: TestClient, admin_password: str
+) -> None:
+    rate_limiter._events.clear()  # noqa: SLF001
+    login = client.post("/api/auth/admin/login", json={"password": admin_password})
+    assert login.status_code == 200
+    ok = client.post(
+        "/api/assessments",
+        json={
+            "team_name": "Claims",
+            "product_service_name": "API",
+            "owner_name": "Owner",
+            "owner_email": "owner@example.com",
+            "lookback_days": 90,
+        },
+        headers={
+            "Origin": "https://safe2devops.up.railway.app",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "safe2devops.up.railway.app",
+            "Sec-Fetch-Site": "same-origin",
+        },
+    )
+    assert ok.status_code == 200, ok.text

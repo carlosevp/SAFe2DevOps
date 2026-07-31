@@ -14,5 +14,8 @@ startCommand = "/app/container_entrypoint.sh"
 # - Set DATA_DIR=/data
 # - Provide APP_SECRET_KEY (admin login secret + session signing), DATA_ENCRYPTION_KEY
 # - Optional ADMIN_PASSWORD_HASH for a dedicated admin password
+# - For OpenAI E2E: OPENAI_API_KEY + INTERVIEW_PROVIDER=live
+# - Set PUBLIC_BASE_URL to the public https://…railway.app URL
+# - Keep ALLOW_MOCK_HOST_AUTH=false (default)
 # - Keep autoscaling disabled (exactly one replica; SQLite single-writer)
 # - Use the platform-provided PORT

@@ -136,7 +136,12 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [part.strip() for part in self.cors_origins.split(",") if part.strip()]
+        origins = [part.strip().rstrip("/") for part in self.cors_origins.split(",") if part.strip()]
+        if self.public_base_url:
+            public = self.public_base_url.strip().rstrip("/")
+            if public and public not in origins:
+                origins.append(public)
+        return origins
 
     @property
     def sqlite_path(self) -> Path | None:

@@ -36,18 +36,37 @@ Set `DATA_DIR=/data`. Do not write application data outside `/data` (temporary f
 | --- | --- | --- |
 | `DATA_DIR` | yes | `/data` |
 | `APP_ENV` | yes | `production` |
-| `APP_SECRET_KEY` | yes | long random secret; also used as the admin login secret |
+| `APP_SECRET_KEY` | yes | long random secret; **admin login secret** + session signing |
 | `DATA_ENCRYPTION_KEY` | yes | long random secret |
 | `ADMIN_PASSWORD_HASH` | optional | bcrypt hash from `scripts/hash_admin_password.py` (also accepted at login) |
 | `PORT` | platform | use Railway-provided `PORT` |
-| `CORS_ORIGINS` | recommended | public Railway URL |
-| `PUBLIC_BASE_URL` | recommended | public Railway URL |
-| `OPENAI_API_KEY` | if live AI | keep server-side only |
+| `PUBLIC_BASE_URL` | recommended | public Railway URL (e.g. `https://<service>.up.railway.app`) |
+| `CORS_ORIGINS` | optional | public Railway URL; same-origin SPA+API works without it |
+| `OPENAI_API_KEY` | if live AI | server-side only |
+| `INTERVIEW_PROVIDER` | if live AI | set `live` for OpenAI end-to-end workshops |
+| `ALLOW_MOCK_HOST_AUTH` | no | must stay unset/`false` in production |
 | `SQLITE_JOURNAL_MODE` | optional | default `DELETE` |
 | `SQLITE_BUSY_TIMEOUT_MS` | optional | default `5000` |
 
 5. Keep replica count at **1** and disable autoscaling.
 6. Health check path: `/api/health/ready` (configured in `railway.toml`).
+
+### Admin access (whole app)
+
+The packaged UI + API are served from one Railway URL. On first visit you get an **Admin sign-in** screen; enter the same value as `APP_SECRET_KEY`. That session cookie is required for integrations, setup, workshop, review, AI settings, and enterprise standards. Remote invite links (`?invite=…`) stay public.
+
+### OpenAI end-to-end on Railway
+
+```text
+APP_SECRET_KEY=<long random secret you will type at login>
+DATA_ENCRYPTION_KEY=<different long random secret>
+OPENAI_API_KEY=<your key>
+INTERVIEW_PROVIDER=live
+PUBLIC_BASE_URL=https://<your-service>.up.railway.app
+ALLOW_MOCK_HOST_AUTH=false
+```
+
+Do not set `VITE_API_BASE_URL` for the Railway image; the SPA calls `/api` on the same origin.
 
 ## Startup sequence
 
