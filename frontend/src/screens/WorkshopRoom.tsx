@@ -274,7 +274,7 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
       setLastResult(result)
       setSession(result.session)
       onAssessmentBound?.(result.session.assessment_id, result.session.team_name)
-      setAnswerText('')
+      resetVoiceForNextAnswer()
       setOutcome(result.session.last_outcome === 'clarify' ? 'clarify' : 'sufficient')
       lastIdempotency.current = null
     } catch (err) {
@@ -288,20 +288,21 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
   }
 
   async function handleSubmitClarification() {
-    if (!effectiveAssessmentId || !clarificationText.trim()) return
+    const text = (answerText || clarificationText).trim()
+    if (!effectiveAssessmentId || !text) return
     setOutcome('processing')
     setError(null)
     const key = newIdempotencyKey()
     try {
       const result = await submitInterviewTurn(effectiveAssessmentId, {
-        answer_text: clarificationText.trim(),
+        answer_text: text,
         idempotency_key: key,
         is_clarification: true,
       })
       setLastResult(result)
       setSession(result.session)
       onAssessmentBound?.(result.session.assessment_id, result.session.team_name)
-      setClarificationText('')
+      resetVoiceForNextAnswer()
       setOutcome(result.session.last_outcome === 'clarify' ? 'clarify' : 'sufficient')
     } catch (err) {
       setOutcome('clarify')
@@ -313,7 +314,16 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
     }
   }
 
+  function resetVoiceForNextAnswer() {
+    hostEditingLive.current = false
+    setTypedNote('')
+    setAnswerText('')
+    setClarificationText('')
+    voiceRef.current?.discard()
+  }
+
   function continueNext() {
+    resetVoiceForNextAnswer()
     setOutcome('none')
     setLastResult(null)
   }
@@ -598,7 +608,29 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
             </div>
           </div>
 
-          {outcome === 'none' && (
+          {outcome === 'clarify' && (
+            <div
+              className="rounded-xl p-5 animate-slide-in"
+              style={{ background: dark ? '#0f1d40' : '#eef3fa', border: '2px solid var(--primary)' }}
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <AlertCircle size={15} style={{ color: 'var(--primary)' }} />
+                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--primary)' }}>
+                  One follow-up
+                </span>
+              </div>
+              <p className="font-serif text-base mb-2" style={{ color: 'var(--foreground)', lineHeight: 1.6 }}>
+                {session?.pending_clarification}
+              </p>
+              {session?.coverage_confirmation && (
+                <p className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.6 }}>
+                  {session.coverage_confirmation}
+                </p>
+              )}
+            </div>
+          )}
+
+          {(outcome === 'none' || outcome === 'clarify') && (
             <div className="rounded-xl p-5" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
               {privacyNotice && (
                 <div className="mb-3 text-xs rounded-lg px-3 py-2" style={{ background: dark ? '#141f35' : '#f8fafc', color: 'var(--muted-foreground)', lineHeight: 1.5 }}>
@@ -641,6 +673,27 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                       />
                     </div>
                   )}
+                  <div className="mt-5 pt-4 text-left" style={{ borderTop: `1px solid ${cardBorder}` }}>
+                    <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)' }}>Or type the answer</p>
+                    <textarea
+                      value={answerText}
+                      onChange={e => setAnswerText(e.target.value)}
+                      className="w-full rounded-lg p-3 text-sm outline-none resize-none"
+                      style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', minHeight: 120, lineHeight: 1.7 }}
+                      placeholder={outcome === 'clarify' ? 'Type your clarification…' : "Type the team's answer…"}
+                    />
+                    <div className="flex justify-end mt-3">
+                      <button
+                        onClick={() => void (outcome === 'clarify' ? handleSubmitClarification() : handleSubmitAnswer())}
+                        disabled={!answerText.trim()}
+                        className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg font-medium"
+                        style={{ background: 'var(--primary)', color: '#fff', opacity: answerText.trim() ? 1 : 0.5 }}
+                      >
+                        <Send size={11} />
+                        {outcome === 'clarify' ? 'Submit clarification' : 'Submit response'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -675,12 +728,12 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                       <Mic size={12} /> Try microphone again
                     </button>
                     <button
-                      onClick={() => void handleSubmitAnswer()}
+                      onClick={() => void (outcome === 'clarify' ? handleSubmitClarification() : handleSubmitAnswer())}
                       disabled={!answerText.trim()}
                       className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg font-medium"
                       style={{ background: 'var(--primary)', color: '#fff', opacity: answerText.trim() ? 1 : 0.5 }}
                     >
-                      <Send size={11} /> Submit response
+                      <Send size={11} /> {outcome === 'clarify' ? 'Submit clarification' : 'Submit response'}
                     </button>
                   </div>
                 </div>
@@ -852,13 +905,13 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Autosaves as you type</span>
                     </div>
                     <button
-                      onClick={() => void handleSubmitAnswer()}
+                      onClick={() => void (outcome === 'clarify' ? handleSubmitClarification() : handleSubmitAnswer())}
                       disabled={!answerText.trim()}
                       className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-lg font-medium transition-base"
                       style={{ background: 'var(--primary)', color: '#fff', opacity: answerText.trim() ? 1 : 0.5 }}
                     >
                       <Send size={11} />
-                      Submit response
+                      {outcome === 'clarify' ? 'Submit clarification' : 'Submit response'}
                     </button>
                   </div>
                   {import.meta.env.DEV && voiceDiag && (
@@ -901,44 +954,6 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
                   Reviewing your response against the assessment model and available evidence…
                 </p>
               </div>
-            </div>
-          )}
-
-          {outcome === 'clarify' && (
-            <div
-              className="rounded-xl p-5 animate-slide-in"
-              style={{ background: dark ? '#0f1d40' : '#eef3fa', border: '2px solid var(--primary)' }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <AlertCircle size={15} style={{ color: 'var(--primary)' }} />
-                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--primary)' }}>
-                  One follow-up
-                </span>
-              </div>
-              <p className="font-serif text-base mb-4" style={{ color: 'var(--foreground)', lineHeight: 1.6 }}>
-                {session?.pending_clarification}
-              </p>
-              {session?.coverage_confirmation && (
-                <p className="text-sm mb-3" style={{ color: 'var(--muted-foreground)', lineHeight: 1.6 }}>
-                  {session.coverage_confirmation}
-                </p>
-              )}
-              <textarea
-                value={clarificationText}
-                onChange={e => setClarificationText(e.target.value)}
-                placeholder="Type your clarification…"
-                className="w-full rounded-lg p-3 text-sm outline-none resize-none mb-3"
-                style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)', minHeight: 80, lineHeight: 1.7 }}
-              />
-              <button
-                onClick={() => void handleSubmitClarification()}
-                disabled={!clarificationText.trim()}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-base"
-                style={{ background: 'var(--primary)', color: '#fff', opacity: clarificationText.trim() ? 1 : 0.5 }}
-              >
-                <Send size={13} />
-                Submit clarification
-              </button>
             </div>
           )}
 

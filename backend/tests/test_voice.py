@@ -214,6 +214,65 @@ def test_refine_mock_deletes_temp_audio_when_retention_disabled(client: TestClie
         db.close()
 
 
+def test_transcribe_file_retries_minimal_then_fallback_model(tmp_path: Path) -> None:
+    audio = tmp_path / "capture.webm"
+    audio.write_bytes(b"fake-audio")
+    factory = get_session_factory()
+    db = factory()
+    try:
+        service = VoiceService(db)
+        calls: list[list[tuple[str, str]]] = []
+
+        class FakeResponse:
+            def __init__(self, status_code: int, payload: dict | str):
+                self.status_code = status_code
+                self._payload = payload
+                self.text = payload if isinstance(payload, str) else json.dumps(payload)
+
+            def json(self) -> dict:
+                assert isinstance(self._payload, dict)
+                return self._payload
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, headers=None, data=None, files=None):
+                form = list(data or [])
+                calls.append(form)
+                model = dict(form).get("model")
+                if model == "gpt-transcribe" and any(k == "keywords" for k, _ in form):
+                    return FakeResponse(400, {"error": {"message": "Invalid keywords"}})
+                if model == "gpt-transcribe":
+                    return FakeResponse(400, {"error": {"message": "Unsupported model"}})
+                return FakeResponse(200, {"text": " Refined answer "})
+
+        with (
+            patch.object(service.settings, "openai_api_key", "sk-test"),
+            patch("app.services.voice.httpx.Client", FakeClient),
+        ):
+            text = service._transcribe_file(
+                path=audio,
+                filename="capture.webm",
+                content_type="audio/webm",
+                model="gpt-transcribe",
+                prompt="SAFe DevOps assessment",
+                keywords=["CI/CD", "bad<keyword>"],
+                languages=["en-US"],
+            )
+        assert text.strip() == "Refined answer"
+        assert len(calls) == 3
+        assert dict(calls[2]).get("model") == "gpt-4o-transcribe"
+    finally:
+        db.close()
+
+
 def test_refine_failure_falls_back_to_live_draft(client: TestClient) -> None:
     client.put(
         "/api/voice/settings",

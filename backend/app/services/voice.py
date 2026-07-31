@@ -494,60 +494,79 @@ class VoiceService:
                 message="OPENAI_API_KEY is required for final transcription",
                 status_code=503,
             )
-        mime = content_type or "application/octet-stream"
-        form_data: list[tuple[str, str]] = [
-            ("model", model),
-            ("response_format", "json"),
-        ]
-        full_prompt = prompt[:900] if prompt else ""
-        keyword_line = ", ".join(keywords[:40])
-        if keyword_line:
-            full_prompt = f"{full_prompt} Key terms: {keyword_line}".strip()[:900]
-        if full_prompt:
-            form_data.append(("prompt", full_prompt))
+
+        attempts: list[tuple[str, list[tuple[str, str]]]] = []
+        clean_keywords = sanitize_keywords(keywords)[:40]
+        langs = [str(x).split("-")[0].lower() for x in languages if str(x).strip()][:6] or ["en"]
+        short_prompt = (prompt or "").strip()[:900]
 
         if model == "gpt-transcribe":
-            for lang in languages[:6]:
-                form_data.append(("languages[]", lang))
-            for kw in keywords[:40]:
-                form_data.append(("keywords[]", kw))
-        elif languages:
-            form_data.append(("language", languages[0]))
+            rich: list[tuple[str, str]] = [("model", model), ("response_format", "json")]
+            if short_prompt:
+                rich.append(("prompt", short_prompt))
+            for lang in langs:
+                rich.append(("languages", lang))
+            for kw in clean_keywords:
+                rich.append(("keywords", kw))
+            attempts.append(("gpt-transcribe+context", rich))
+            attempts.append(
+                ("gpt-transcribe+minimal", [("model", model), ("response_format", "json")])
+            )
+            # Fallback if the account/model snapshot rejects gpt-transcribe fields.
+            legacy: list[tuple[str, str]] = [
+                ("model", "gpt-4o-transcribe"),
+                ("response_format", "json"),
+                ("language", langs[0]),
+            ]
+            if short_prompt:
+                legacy.append(("prompt", short_prompt))
+            attempts.append(("gpt-4o-transcribe+context", legacy))
+        else:
+            form: list[tuple[str, str]] = [("model", model), ("response_format", "json")]
+            if langs:
+                form.append(("language", langs[0]))
+            if short_prompt:
+                form.append(("prompt", short_prompt))
+            attempts.append((f"{model}+context", form))
+            attempts.append((f"{model}+minimal", [("model", model), ("response_format", "json")]))
 
-        with path.open("rb") as handle:
-            files = {"file": (filename or path.name, handle, mime)}
-            with httpx.Client(timeout=120.0) as client:
-                response = client.post(
-                    OPENAI_AUDIO_TRANSCRIPTIONS_URL,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    data=form_data,
-                    files=files,
-                )
-        if response.status_code >= 400:
-            detail = _openai_error_message(response.text)
-            logger.warning(
-                "audio transcriptions failed status=%s body=%s",
-                response.status_code,
-                redact_secrets(response.text[:400]),
-            )
-            raise AppError(
-                code="final_transcription_failed",
-                message=detail or "Final transcription failed",
-                status_code=502,
-            )
-        try:
-            payload = response.json()
-            text = payload.get("text") if isinstance(payload, dict) else None
-            if isinstance(text, str) and text.strip():
-                return text
-        except Exception:  # noqa: BLE001
-            pass
-        body = response.text.strip()
-        if body:
-            return body
+        mime = content_type or "application/octet-stream"
+        last_detail = ""
+        with httpx.Client(timeout=120.0) as client:
+            for label, form_data in attempts:
+                with path.open("rb") as handle:
+                    response = client.post(
+                        OPENAI_AUDIO_TRANSCRIPTIONS_URL,
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        data=form_data,
+                        files={"file": (filename or path.name, handle, mime)},
+                    )
+                if response.status_code >= 400:
+                    last_detail = _openai_error_message(response.text)
+                    logger.warning(
+                        "audio transcriptions failed attempt=%s status=%s body=%s",
+                        label,
+                        response.status_code,
+                        redact_secrets(response.text[:400]),
+                    )
+                    continue
+                try:
+                    payload = response.json()
+                    text = payload.get("text") if isinstance(payload, dict) else None
+                    if isinstance(text, str) and text.strip():
+                        logger.info("audio transcriptions succeeded attempt=%s", label)
+                        return text
+                except Exception:  # noqa: BLE001
+                    pass
+                body = response.text.strip()
+                if body and not body.startswith("{"):
+                    logger.info("audio transcriptions succeeded attempt=%s text_body", label)
+                    return body
+                last_detail = "Final transcription returned empty text"
+
         raise AppError(
-            code="final_transcription_empty",
-            message="Final transcription returned empty text",
+            code="final_transcription_failed",
+            message=last_detail or "Final transcription failed",
             status_code=502,
         )
 
