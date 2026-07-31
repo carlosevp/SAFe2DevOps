@@ -1,41 +1,36 @@
-# figma-make-app
+# SAFe2DevOps agent guide
 
-React + Vite + Tailwind CSS project running inside Figma Make.
+Monorepo for the SAFe DevOps Adaptive Assessment.
 
-## Development Server
+## Layout
 
-A Vite development server is **already running** on `$PORT` (default 8443). You don't need to start it manually.
+- `frontend/` — Figma Make React + Vite + Tailwind UI (UX source of truth)
+- `backend/app/` — FastAPI application factory, API, core, models, services
+- `deploy/openshift/` — single-replica OpenShift skeletons
+- `docs/` — product scope, architecture, ADRs
+- `scripts/` — local/container helpers
 
-- Preview URL: The user can access the running app through the preview panel
-- Hot reload: Changes to source files are reflected immediately
+## Frontend
 
-## Project Structure
+- Entrypoint: `frontend/src/main.tsx` → `frontend/src/App.tsx`
+- Styles/tokens: `frontend/src/index.css`
+- API helper: `frontend/src/lib/api.ts` (same-origin `/api`, cookie credentials)
+- Package manager: pnpm (`frontend/pnpm-lock.yaml`)
+- Commands: `pnpm run typecheck`, `pnpm run build`, `pnpm run dev`
 
-This is the canonical project structure. Start with task-relevant files below. Only follow imports or inspect other files when required, when a documented path is missing, or when the repository contradicts this guide.
+Preserve Figma visual design. Only refactor frontend where needed to connect cleanly to the backend.
 
-- `src/main.tsx` - React entrypoint; imports `src/index.css` and mounts `src/App.tsx` into the `#root` element
-- `src/App.tsx` - Primary application component and the usual starting point for UI work
-- `src/index.css` - Global CSS entrypoint and Tailwind CSS v4 import
-- `index.html` - Vite HTML shell containing the `#root` element and loading `src/main.tsx`
-- `package.json` - Project dependencies and the Vite build, development, preview, and formatting scripts
-- `vite.config.ts` - Vite configuration with React, Tailwind CSS v4, and Figma Make plugins plus the `@` alias for `src`
-- `.mise.toml` - Toolchain versions for Node.js and pnpm
+## Backend
 
-## Dependencies
-
-- Runtime: React 19 and React DOM 19
-- Styling: Tailwind CSS v4 with the `@tailwindcss/vite` plugin
-- Build tooling: Vite 8, TypeScript 5.7, and `@vitejs/plugin-react`
-- Formatting: oxfmt
-
-## Styling
-
-This project uses **Tailwind CSS v4** through the `@tailwindcss/vite` plugin configured in `vite.config.ts`. `src/index.css` imports Tailwind with `@import 'tailwindcss';`. Use Tailwind utility classes directly in JSX and put global CSS or Tailwind v4 theme customization in `src/index.css`. This scaffold does not need a Tailwind config file or PostCSS config.
-
-`src/main.tsx` imports `src/index.css`, so global font wiring belongs in `src/index.css`. Keep CSS `@import` statements first, then add any `@font-face` rules and font-family defaults there.
+- Python 3.12, FastAPI, Pydantic, SQLAlchemy, Alembic, SQLite
+- App factory: `backend/app/main.py`
+- Health: `/api/health/live`, `/api/health/ready`
+- Admin auth cookie foundation under `/api/auth/admin/*`
+- Runtime data under `DATA_DIR` (`./data` local, `/data` deployed)
+- Exactly one Uvicorn worker / one replica while SQLite is used
 
 ## Code quality
 
-- Use double quotes for strings containing apostrophes (`"We're here to help"`), or escape them in single-quoted strings. An unescaped apostrophe in a single-quoted string breaks the build.
-- Ensure JSX tags are closed and braces are balanced.
-- Export components as default exports.
+- TypeScript: keep `strict`, use double quotes for strings containing apostrophes
+- Python: type hints on public functions, short SQLite transactions, never return absolute filesystem paths from APIs
+- Do not implement Jira, ADO, adaptive interviews, voice, or scoring until those phases

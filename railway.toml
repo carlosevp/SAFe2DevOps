@@ -1,0 +1,14 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+numReplicas = 1
+restartPolicyType = "ON_FAILURE"
+healthcheckPath = "/api/health/live"
+healthcheckTimeout = 30
+startCommand = "/app/container_entrypoint.sh"
+
+[service]
+# Mount a Railway volume at /data for SQLite and runtime files.
+# Use exactly one replica while SQLite is the store.

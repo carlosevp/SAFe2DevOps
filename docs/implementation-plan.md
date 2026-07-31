@@ -1,24 +1,26 @@
 # Implementation plan
 
-## Phase 0 — Bootstrap (this phase)
+## Phase 0 — Bootstrap
 
 - [x] Inspect Figma workspace and Git remote safety
 - [x] Verify frontend typecheck + production build
 - [x] Harden ignore files and secret templates
 - [x] Document scope, screens, architecture, ADRs
 - [x] Add Cursor rules for upcoming implementation
-- [ ] Authenticate GitHub CLI and publish remaining Phase 0 commits
+- [x] Publish Phase 0 commit to GitHub
 
-**No backend logic in this phase.**
+**No backend logic in Phase 0.**
 
-## Phase 1 — Foundation
+## Phase 1 — Foundation (current)
 
-- Python API skeleton with health check
-- Config via environment variables (`.env.example` contract)
-- SQLite schema + migrations on mounted path
-- Session/auth baseline for admin/host
-- Docker/Railway/OpenShift deployment stubs with single-replica constraint
-- Frontend API client shell (still may fall back to mocks)
+- [x] Move Figma app into `frontend/`
+- [x] FastAPI app factory, typed settings, logging redaction
+- [x] SQLAlchemy + Alembic + SQLite under `DATA_DIR`
+- [x] Storage path service + readiness checks
+- [x] Health endpoints, SPA fallback, security headers, request IDs
+- [x] Admin session cookie auth + assessment-access token foundation
+- [x] Combined Dockerfile, Railway + OpenShift skeletons
+- [x] Foundation tests and frontend API client shell
 
 ## Phase 2 — Integrations & evidence
 

@@ -1,6 +1,6 @@
 ---
 description: Preserve Figma Make frontend fidelity
-globs: src/**/*.{ts,tsx,css}
+globs: frontend/src/**/*.{ts,tsx,css}
 alwaysApply: false
 ---
 

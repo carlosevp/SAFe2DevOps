@@ -5,11 +5,10 @@ alwaysApply: true
 
 # Architecture
 
-- Frontend: React 19 + Vite + TypeScript + Tailwind v4
-- Backend: Python API (not implemented in Phase 0)
-- Integrations: Jira Cloud + Azure DevOps Services, read-only, server-side credentials
-- AI: OpenAI for transcription assist, adaptive questioning, draft scoring
-- Persistence: SQLite on mounted volume via `DATABASE_PATH`
-- Scale: single replica while SQLite is used
+- Frontend lives in `frontend/` (React 19 + Vite + TypeScript + Tailwind v4)
+- Backend lives in `backend/app/` (Python 3.12 FastAPI + SQLAlchemy + Alembic)
+- Combined container: FastAPI serves `/api` and the built SPA from one origin
+- Persistence: SQLite under `DATA_DIR` (`./data` local, `/data` deployed)
+- Scale: exactly one replica and one Uvicorn worker while SQLite is used
 - Follow `docs/target-architecture.md` and ADRs under `docs/decisions/`
 - Prefer vertical slices that replace one mocked screen at a time

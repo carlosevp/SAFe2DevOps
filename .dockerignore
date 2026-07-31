@@ -1,56 +1,44 @@
-# Git and VCS
 .git
-.gitignore
 .gitattributes
+.cursor
+.vscode
+.idea
+.DS_Store
+Thumbs.db
 
-# Dependencies and build
-node_modules
-dist
-build
-out
-coverage
-.pnpm-store
-.vite
-.cache
-.tmp-*
+**/node_modules
+**/dist
+**/build
+**/.venv
+**/venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/coverage
+**/.pnpm-store
+**/.vite
+**/.cache
 
-# Environment and secrets
 .env
 .env.*
 !.env.example
 *.pem
 *.key
-
-# Local data
 *.db
 *.sqlite
 *.sqlite3
-data
+/data
 uploads
 exports
 logs
 *.log
 
-# Docs and editor (not needed in runtime image)
-.cursor
-.vscode
-.idea
+docs
 *.md
 !README.md
-docs
 AGENTS.md
 CLAUDE.md
 CONTRIBUTING.md
 SECURITY.md
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Python local
-.venv
-venv
-__pycache__
-.pytest_cache
-.mypy_cache
-.ruff_cache
+agent-transcripts

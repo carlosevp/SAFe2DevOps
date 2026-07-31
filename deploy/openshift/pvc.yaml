@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: safedevops-data
+  labels:
+    app.kubernetes.io/name: safedevops
+spec:
+  accessModes:
+    # Default for single-replica SQLite. Prefer ReadWriteOncePod on clusters that support it
+    # to guarantee exclusive attachment to one pod.
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # storageClassName: <cluster-default-or-explicit>

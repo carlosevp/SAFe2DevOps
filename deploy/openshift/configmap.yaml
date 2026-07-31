@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: safedevops-config
+  labels:
+    app.kubernetes.io/name: safedevops
+data:
+  APP_ENV: "production"
+  DATA_DIR: "/data"
+  FRONTEND_DIST: "/app/frontend/dist"
+  SQLITE_JOURNAL_MODE: "WAL"
+  SQLITE_BUSY_TIMEOUT_MS: "5000"
+  SQLITE_SYNCHRONOUS_MODE: "NORMAL"
+  OPENAI_ASSESSMENT_MODEL: "gpt-5.6-terra"
+  OPENAI_TRANSCRIPTION_MODEL: "gpt-realtime-whisper"
+  OPENAI_REASONING_EFFORT: "medium"
+  CORS_ORIGINS: "https://safedevops.example.com"

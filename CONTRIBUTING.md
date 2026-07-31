@@ -7,20 +7,29 @@
 3. Prefer small, reviewable changes aligned to `docs/implementation-plan.md`.
 4. Never commit secrets, credentials, local databases, uploads, exports, or build artifacts.
 
-## Local setup (frontend)
+## Local setup
+
+Frontend:
 
 ```bash
+cd frontend
 pnpm install
-pnpm exec tsc --noEmit
+pnpm run typecheck
 pnpm run build
 pnpm run dev
 ```
 
-Optional formatting:
+Backend:
 
 ```bash
-pnpm run format
+cd backend
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest
 ```
+
+See root `README.md` for combined startup and environment variables.
 
 ## Branching
 

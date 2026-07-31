@@ -1,9 +1,14 @@
 # Dependencies
 node_modules/
+frontend/node_modules/
 .pnpm-store/
+backend/.venv/
+.venv/
+venv/
 
 # Build output
 dist/
+frontend/dist/
 build/
 out/
 coverage/
@@ -27,13 +32,13 @@ credentials.json
 service-account.json
 
 # Local data / persistence
+/data/
 *.db
 *.sqlite
 *.sqlite3
-/data/
-/uploads/
-/exports/
-/logs/
+uploads/
+exports/
+logs/
 *.log
 *-debug.log*
 
@@ -47,17 +52,17 @@ Thumbs.db
 *.swp
 *.swo
 
-# Test / tooling
+# Python tooling
+__pycache__/
+*.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
 .tox/
-.venv/
-venv/
-__pycache__/
-*.py[cod]
+*.egg-info/
+backend/*.egg-info/
 
 # Figma Make local replay / tooling noise
 .claude-replay.*
