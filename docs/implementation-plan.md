@@ -22,12 +22,19 @@
 - [x] Combined Dockerfile, Railway + OpenShift skeletons
 - [x] Foundation tests and frontend API client shell
 
+## Phase 1b — Assessment model & core data (current)
+
+- [x] Configuration-driven YAML assessment model (4 domains / 16 practices)
+- [x] Strict Pydantic validation failing startup on invalid config
+- [x] Core SQLAlchemy entities + Alembic migration
+- [x] Repositories, lifecycle, publication, encryption, audit, seed
+- [x] Participant score secrecy and published report immutability
+
 ## Phase 2 — Integrations & evidence
 
 - Jira Cloud connection + project listing
 - Azure DevOps connection + repository/pipeline listing
-- Encrypted credential storage
-- Evidence snapshot for one project + one repo
+- Evidence snapshot collection for one project + one repo
 - Wire Integrations, SetupWizard, EvidencePreview to real APIs
 
 ## Phase 3 — Workshop & adaptive flow

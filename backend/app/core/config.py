@@ -50,9 +50,21 @@ class Settings(BaseSettings):
     assessment_token_ttl_seconds: int = 60 * 60 * 24 * 7
     cors_origins: str = "http://localhost:5173,http://localhost:8443"
     frontend_dist: Path | None = None
+    assessment_config_path: Path | None = None
     log_level: str = "INFO"
+    seed_demo_data: bool = False
 
-    @field_validator("data_dir", "upload_dir", "export_dir", "evidence_dir", "backup_dir", "working_dir", "frontend_dist", mode="before")
+    @field_validator(
+        "data_dir",
+        "upload_dir",
+        "export_dir",
+        "evidence_dir",
+        "backup_dir",
+        "working_dir",
+        "frontend_dist",
+        "assessment_config_path",
+        mode="before",
+    )
     @classmethod
     def _coerce_path(cls, value: object) -> object:
         if value is None or value == "":

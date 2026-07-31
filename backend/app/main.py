@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.assessment_config import load_assessment_model_config, reset_assessment_model_cache
 from app.core.config import get_settings, reset_settings_cache
 from app.core.db import dispose_engine, init_engine
 from app.core.errors import register_exception_handlers
@@ -35,6 +36,9 @@ async def lifespan(app: FastAPI):
 
     storage = StorageService(settings)
     storage.ensure_directories()
+    # Fail fast when assessment YAML is missing or invalid.
+    reset_assessment_model_cache()
+    load_assessment_model_config(settings.assessment_config_path)
     if settings.database_url:
         run_migrations(settings.database_url)
     init_engine(settings)

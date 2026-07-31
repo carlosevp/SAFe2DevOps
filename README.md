@@ -130,9 +130,24 @@ APIs return logical storage labels only — never absolute filesystem paths.
 - Prefer `ReadWriteOncePod` when the cluster supports it; manifests default to `ReadWriteOnce`
 - Container runs non-root / arbitrary-UID friendly and writes only to `/data` and `/tmp`
 
+## Assessment model
+
+Configuration-driven SAFe model (4 domains / 16 practices):
+
+`config/assessment/assessment_model.yaml`
+
+Validated at startup. Admins can reorder domains/practices via `order` fields without code changes. See [docs/assessment-model.md](docs/assessment-model.md).
+
+Demo seed:
+
+```bash
+python scripts/seed_demo.py
+```
+
 ## Documentation
 
 - [Product scope](docs/product-scope.md)
+- [Assessment model](docs/assessment-model.md)
 - [Figma screen map](docs/figma-screen-map.md)
 - [Target architecture](docs/target-architecture.md)
 - [Implementation plan](docs/implementation-plan.md)

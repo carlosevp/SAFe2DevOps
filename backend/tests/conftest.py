@@ -32,6 +32,7 @@ def app_env(tmp_data_dir: Path, admin_password: str, tmp_path: Path) -> Generato
     (dist / "index.html").write_text("<!doctype html><html><body>SPA</body></html>", encoding="utf-8")
     (dist / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
 
+    repo_root = Path(__file__).resolve().parents[2]
     env = {
         "APP_ENV": "test",
         "DATA_DIR": str(tmp_data_dir),
@@ -42,6 +43,7 @@ def app_env(tmp_data_dir: Path, admin_password: str, tmp_path: Path) -> Generato
         "FRONTEND_DIST": str(dist),
         "CORS_ORIGINS": "http://testserver",
         "LOG_LEVEL": "WARNING",
+        "ASSESSMENT_CONFIG_PATH": str(repo_root / "config" / "assessment" / "assessment_model.yaml"),
     }
     previous = {key: os.environ.get(key) for key in env}
     os.environ.update(env)

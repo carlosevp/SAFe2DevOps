@@ -5,10 +5,13 @@ from pathlib import Path
 from app.core.config import Settings
 
 
-def test_settings_derive_data_layout(tmp_path: Path) -> None:
+def test_settings_derive_data_layout(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("ASSESSMENT_CONFIG_PATH", raising=False)
     settings = Settings(
         app_env="test",
         data_dir=tmp_path / "data",
+        database_url=None,
         app_secret_key="x" * 32,
         data_encryption_key="y" * 32,
     )
@@ -25,10 +28,12 @@ def test_settings_derive_data_layout(tmp_path: Path) -> None:
     assert settings.sqlite_busy_timeout_ms == 5000
 
 
-def test_cors_origin_list_parsing(tmp_path: Path) -> None:
+def test_cors_origin_list_parsing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     settings = Settings(
         app_env="test",
         data_dir=tmp_path / "data",
+        database_url=None,
         cors_origins="http://a.example, http://b.example",
         app_secret_key="x" * 32,
         data_encryption_key="y" * 32,

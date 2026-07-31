@@ -4,6 +4,7 @@ set -eu
 export DATA_DIR="${DATA_DIR:-/data}"
 export APP_ENV="${APP_ENV:-production}"
 export FRONTEND_DIST="${FRONTEND_DIST:-/app/frontend/dist}"
+export ASSESSMENT_CONFIG_PATH="${ASSESSMENT_CONFIG_PATH:-/app/config/assessment/assessment_model.yaml}"
 export PORT="${PORT:-8000}"
 
 mkdir -p \

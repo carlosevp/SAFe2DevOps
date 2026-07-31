@@ -20,6 +20,8 @@ dependencies = [
   "itsdangerous>=2.2.0",
   "python-multipart>=0.0.32",
   "email-validator>=2.3.0",
+  "pyyaml>=6.0.0",
+  "cryptography>=44.0.0",
 ]
 
 [project.optional-dependencies]
