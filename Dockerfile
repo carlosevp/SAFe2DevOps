@@ -41,9 +41,11 @@ COPY --from=backend-build /usr/local /usr/local
 COPY backend /app/backend
 COPY --from=frontend-build /frontend/dist /app/frontend/dist
 COPY scripts/container_entrypoint.sh /app/container_entrypoint.sh
+COPY scripts/ops_admin.py /app/scripts/ops_admin.py
 COPY config /app/config
 
 RUN chmod 755 /app/container_entrypoint.sh \
+    && chmod 755 /app/scripts/ops_admin.py \
     && chgrp -R 0 /app \
     && chmod -R g+rwX /app
 

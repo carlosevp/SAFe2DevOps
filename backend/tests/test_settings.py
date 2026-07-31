@@ -26,6 +26,8 @@ def test_settings_derive_data_layout(tmp_path: Path, monkeypatch) -> None:
     assert settings.openai_assessment_model == "gpt-5.6-terra"
     assert settings.openai_transcription_model == "gpt-realtime-whisper"
     assert settings.sqlite_busy_timeout_ms == 5000
+    assert settings.sqlite_journal_mode == "DELETE"
+    assert settings.sqlite_synchronous_mode == "FULL"
 
 
 def test_cors_origin_list_parsing(tmp_path: Path, monkeypatch) -> None:

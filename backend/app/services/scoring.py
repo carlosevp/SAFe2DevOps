@@ -11,8 +11,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.integrations.http import sanitize_remote_text
 from app.models import Assessment, AssessmentReview, ImprovementAction, InterviewTurn, PracticeCoverage
-from app.models.ai_settings import InterviewSession
-from app.models.enums import AssessmentStatus, CoverageState
+from app.models.enums import AssessmentStatus
 from app.openai.scoring_mock import MockScoringProvider
 from app.schemas.scoring import CandidateScoringAI, DomainRadarPoint, HeatmapCell, PracticeReviewOut
 from app.services.ai_settings import AiSettingsService

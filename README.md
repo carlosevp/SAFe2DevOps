@@ -125,10 +125,13 @@ APIs return logical storage labels only — never absolute filesystem paths.
 
 ## Deployment notes
 
-- Railway: `railway.toml`, volume mounted at `/data`, `numReplicas = 1`
-- OpenShift: `deploy/openshift/*`, `replicas: 1`, `strategy: Recreate`, PVC at `/data`
+- Railway: see [docs/deploy-railway.md](docs/deploy-railway.md) — `railway.toml`, volume at `/data`, `DATA_DIR=/data`, `numReplicas = 1`
+- OpenShift: see [docs/deploy-openshift.md](docs/deploy-openshift.md) — `deploy/openshift/*`, `replicas: 1`, `strategy: Recreate`, PVC at `/data`
 - Prefer `ReadWriteOncePod` when the cluster supports it; manifests default to `ReadWriteOnce`
+- SQLite default journal mode is `DELETE` (portable); enable WAL only on validated storage
 - Container runs non-root / arbitrary-UID friendly and writes only to `/data` and `/tmp`
+- Backups: [docs/backup-restore.md](docs/backup-restore.md) (`scripts/ops_admin.py`)
+- CI: `.github/workflows/ci.yml` (no automatic OpenShift deploy)
 
 ## Assessment model
 
@@ -153,6 +156,10 @@ python scripts/seed_demo.py
 - [Implementation plan](docs/implementation-plan.md)
 - [ADR-001 Fresh build](docs/decisions/ADR-001-fresh-build.md)
 - [ADR-002 SQLite persistent storage](docs/decisions/ADR-002-sqlite-persistent-storage.md)
+- [Railway deployment](docs/deploy-railway.md)
+- [OpenShift deployment](docs/deploy-openshift.md)
+- [Backup and restore](docs/backup-restore.md)
+- [CI/CD](docs/ci-cd.md)
 
 ## Safety
 

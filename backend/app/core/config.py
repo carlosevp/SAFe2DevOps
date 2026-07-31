@@ -41,9 +41,11 @@ class Settings(BaseSettings):
     openai_transcription_model: str = "gpt-realtime-whisper"
     openai_reasoning_effort: str = "medium"
 
-    sqlite_journal_mode: str = "WAL"
+    # Default DELETE (rollback journal) is portable across unknown/network-backed volumes.
+    # Use WAL only when the storage platform is explicitly validated for it.
+    sqlite_journal_mode: str = "DELETE"
     sqlite_busy_timeout_ms: int = 5000
-    sqlite_synchronous_mode: str = "NORMAL"
+    sqlite_synchronous_mode: str = "FULL"
 
     session_cookie_name: str = "sd_admin_session"
     session_ttl_seconds: int = 60 * 60 * 12

@@ -9,13 +9,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
-from app.assessment_config import load_assessment_model_config, reset_assessment_model_cache
+from app.core.bootstrap import bootstrap_runtime, log_storage_diagnostics
 from app.core.config import get_settings, reset_settings_cache
 from app.core.db import dispose_engine, init_engine
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import CsrfOriginMiddleware, RequestIdMiddleware, SecurityHeadersMiddleware
-from app.core.migrations import run_migrations
 from app.services.storage import StorageService
 
 logger = logging.getLogger(__name__)
@@ -30,18 +29,11 @@ def _handle_sigterm(signum: int, _frame: object) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = get_settings()
-    configure_logging(settings.log_level)
+    # Entrypoint already bootstraps in containers; re-run is idempotent for local uvicorn.
+    settings = bootstrap_runtime(run_db_migrations=True)
     logger.info("starting app env=%s", settings.app_env)
-
-    storage = StorageService(settings)
-    storage.ensure_directories()
-    # Fail fast when assessment YAML is missing or invalid.
-    reset_assessment_model_cache()
-    load_assessment_model_config(settings.assessment_config_path)
-    if settings.database_url:
-        run_migrations(settings.database_url)
     init_engine(settings)
+    log_storage_diagnostics(settings, StorageService(settings))
 
     previous_handler = None
     try:

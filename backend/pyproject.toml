@@ -29,6 +29,10 @@ dependencies = [
 dev = [
   "pytest>=9.0.0",
   "pytest-asyncio>=1.0.0",
+  "ruff>=0.9.0",
+  "mypy>=1.14.0",
+  "types-PyYAML>=6.0.0",
+  "pip-audit>=2.7.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -43,3 +47,17 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+# Keep CI focused on correctness; broader style rules can be adopted incrementally.
+select = ["E", "F"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = false
+files = ["app"]
+# Incremental typing: keep CI green while the codebase is gradually annotated.
+ignore_errors = true

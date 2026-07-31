@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.assessment_config import get_assessment_model_config
 from app.core.db import get_session_factory
-from app.models.enums import AssessmentStatus, EvidenceInfluenceMode
+from app.models.enums import AssessmentStatus
 from app.openai.scoring_mock import MockScoringProvider
 from app.schemas.scoring import CandidateScoringAI
 from app.services.exports import sanitize_download_name

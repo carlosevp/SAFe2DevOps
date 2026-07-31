@@ -3,7 +3,6 @@ from __future__ import annotations
 import gzip
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -13,7 +12,7 @@ from app.assessment_config import get_assessment_model_config
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.integrations.http import sanitize_remote_text
-from app.models import Assessment, InterviewTurn, PracticeCoverage
+from app.models import Assessment, InterviewTurn
 from app.models.ai_settings import InterviewSession
 from app.models.enums import AssessmentStatus, CoverageState, InterviewTurnSource, InterviewTurnType
 from app.openai.factory import get_interview_provider

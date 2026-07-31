@@ -1,0 +1,59 @@
+name: OpenShift deploy (manual)
+
+# Does NOT run on push. Requires repository secrets AND an environment with
+# required reviewers / approval controls before any cluster changes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy"
+        required: true
+        default: "latest"
+      confirm:
+        description: "Type deploy to confirm"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to OpenShift
+    runs-on: ubuntu-latest
+    environment: openshift-production
+    if: >
+      github.event.inputs.confirm == 'deploy' &&
+      vars.OPENSHIFT_DEPLOY_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require credentials
+        env:
+          OC_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+          OC_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+          OC_NAMESPACE: ${{ secrets.OPENSHIFT_NAMESPACE }}
+        run: |
+          if [ -z "$OC_SERVER" ] || [ -z "$OC_TOKEN" ] || [ -z "$OC_NAMESPACE" ]; then
+            echo "OpenShift secrets are not configured. Refusing to deploy."
+            exit 1
+          fi
+      - name: Install OpenShift CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+      - name: Login and apply
+        env:
+          OC_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+          OC_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+          OC_NAMESPACE: ${{ secrets.OPENSHIFT_NAMESPACE }}
+          IMAGE: ${{ secrets.OPENSHIFT_IMAGE_REPO }}:${{ github.event.inputs.image_tag }}
+        run: |
+          oc login --token="$OC_TOKEN" --server="$OC_SERVER"
+          oc project "$OC_NAMESPACE"
+          # Apply base manifests; image override is cluster-specific.
+          oc apply -k deploy/openshift
+          if [ -n "${{ secrets.OPENSHIFT_IMAGE_REPO }}" ]; then
+            oc set image deployment/safedevops "app=$IMAGE" -n "$OC_NAMESPACE"
+          fi
+          oc rollout status deployment/safedevops -n "$OC_NAMESPACE" --timeout=5m

@@ -5,10 +5,13 @@ dockerfilePath = "Dockerfile"
 [deploy]
 numReplicas = 1
 restartPolicyType = "ON_FAILURE"
-healthcheckPath = "/api/health/live"
-healthcheckTimeout = 30
+healthcheckPath = "/api/health/ready"
+healthcheckTimeout = 100
 startCommand = "/app/container_entrypoint.sh"
 
-[service]
-# Mount a Railway volume at /data for SQLite and runtime files.
-# Use exactly one replica while SQLite is the store.
+# Required platform settings (configure in Railway UI / CLI):
+# - Mount a persistent volume at /data
+# - Set DATA_DIR=/data
+# - Provide APP_SECRET_KEY, DATA_ENCRYPTION_KEY, ADMIN_PASSWORD_HASH
+# - Keep autoscaling disabled (exactly one replica; SQLite single-writer)
+# - Use the platform-provided PORT

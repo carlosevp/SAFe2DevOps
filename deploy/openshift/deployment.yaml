@@ -22,6 +22,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
         fsGroup: 0
+      terminationGracePeriodSeconds: 30
       containers:
         - name: app
           image: image-registry.openshift-image-registry.svc:5000/safedevops/safedevops:latest
@@ -76,6 +77,10 @@ spec:
             limits:
               cpu: "1"
               memory: 1Gi
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 2"]
       volumes:
         - name: data
           persistentVolumeClaim:
