@@ -111,3 +111,41 @@ class AssessmentModelPublic(StrictSchema):
     domains: list[dict[str, Any]]
     evidence_influence_policies: list[str]
     maturity_levels: list[dict[str, Any]]
+
+
+class EvidenceMetricOut(StrictSchema):
+    key: str
+    label: str
+    value_text: str
+    value_numeric: float | None = None
+    source_system: str
+    trend: str | None = None
+    freshness_label: str | None = None
+
+
+class EvidenceLimitationOut(StrictSchema):
+    code: str
+    message: str
+    source_system: str | None = None
+
+
+class EvidenceSnapshotOut(StrictSchema):
+    id: str
+    assessment_id: str
+    lookback_days: int
+    collected_at: datetime
+    jira_project_key: str
+    ado_repository_name: str
+    provenance_summary: str
+    payload_ref: str | None = None
+    payload_checksum: str | None = None
+    quality: str
+    immutable: bool
+    is_representative: bool
+    metrics: list[EvidenceMetricOut] = Field(default_factory=list)
+    limitations: list[EvidenceLimitationOut] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=list)
+
+
+class EvidenceExclusionsIn(StrictSchema):
+    exclusions: list[str] = Field(default_factory=list)

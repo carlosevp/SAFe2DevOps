@@ -1,11 +1,20 @@
-import { useState } from 'react'
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, CheckCircle2, ChevronRight, XCircle, X } from 'lucide-react'
-import { SAMPLE_METRICS } from '../data/sampleData'
+import { useEffect, useMemo, useState } from 'react'
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, CheckCircle2, XCircle, X } from 'lucide-react'
+import {
+  applyEvidenceExclusions,
+  collectEvidence,
+  confirmEvidence,
+  getLatestEvidence,
+  type EvidenceMetric,
+  type EvidenceSnapshot,
+} from '../lib/api'
 import type { Screen } from '../types'
 
 interface Props {
   dark: boolean
   onNavigate: (s: Screen) => void
+  assessmentId?: string | null
+  assessmentName?: string
 }
 
 const EXCLUSION_OPTIONS = [
@@ -17,24 +26,86 @@ const EXCLUSION_OPTIONS = [
   'One-time setup tasks',
 ]
 
-export default function EvidencePreview({ dark, onNavigate }: Props) {
+export default function EvidencePreview({ dark, onNavigate, assessmentId, assessmentName }: Props) {
+  const [snapshot, setSnapshot] = useState<EvidenceSnapshot | null>(null)
   const [excluded, setExcluded] = useState<string[]>([])
   const [refreshing, setRefreshing] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
 
+  useEffect(() => {
+    if (!assessmentId) return
+    getLatestEvidence(assessmentId)
+      .then(data => {
+        setSnapshot(data)
+        setExcluded(data.exclusions || [])
+      })
+      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load evidence'))
+  }, [assessmentId])
+
   function toggle(item: string) {
-    setExcluded(prev => prev.includes(item) ? prev.filter(e => e !== item) : [...prev, item])
+    setExcluded(prev => {
+      const next = prev.includes(item) ? prev.filter(e => e !== item) : [...prev, item]
+      if (assessmentId && snapshot) {
+        applyEvidenceExclusions(assessmentId, snapshot.id, next)
+          .then(setSnapshot)
+          .catch(err => setError(err instanceof Error ? err.message : 'Failed to apply exclusions'))
+      }
+      return next
+    })
   }
 
-  function handleRefresh() {
+  async function handleRefresh() {
+    if (!assessmentId) return
     setRefreshing(true)
-    setTimeout(() => setRefreshing(false), 2000)
+    setError(null)
+    try {
+      const data = await collectEvidence(assessmentId, true)
+      setSnapshot(data)
+      setExcluded(data.exclusions || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Refresh failed')
+    } finally {
+      setRefreshing(false)
+    }
   }
+
+  async function handleConfirm() {
+    if (!assessmentId || !snapshot) return
+    setConfirming(true)
+    setError(null)
+    try {
+      await confirmEvidence(assessmentId, snapshot.id)
+      onNavigate('workshop')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Confirm failed')
+    } finally {
+      setConfirming(false)
+    }
+  }
+
+  const jiraMetrics = useMemo(
+    () => (snapshot?.metrics || []).filter(m => m.source_system === 'jira'),
+    [snapshot],
+  )
+  const adoMetrics = useMemo(
+    () => (snapshot?.metrics || []).filter(m => m.source_system === 'azdo'),
+    [snapshot],
+  )
+  const fetchedLabel = snapshot
+    ? `Fetched ${new Date(snapshot.collected_at).toLocaleString()}`
+    : 'Collecting…'
+  const teamLabel = assessmentName || 'team'
+  const qualityStates = useMemo(() => {
+    const codes = new Set((snapshot?.limitations || []).map(l => l.code))
+    if (snapshot?.quality) codes.add(snapshot.quality)
+    return codes
+  }, [snapshot])
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--background)' }}>
       <div className="max-w-3xl mx-auto px-6 py-10">
-        {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-xs font-medium mb-6" style={{ color: 'var(--muted-foreground)' }}>
           <button onClick={() => onNavigate('welcome')} className="hover:underline">Assessments</button>
           <span>/</span>
@@ -48,42 +119,48 @@ export default function EvidencePreview({ dark, onNavigate }: Props) {
             Evidence preview
           </h1>
           <p className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
-            Review the delivery data collected from CLAIM (Jira) and claims-api (Azure DevOps) for the last 90 days. Confirm this is representative before starting the assessment.
+            Review the delivery data collected from {snapshot?.jira_project_key || 'Jira'} and {snapshot?.ado_repository_name || 'Azure DevOps'} for the last {snapshot?.lookback_days || 90} days. Confirm this is representative before starting the assessment.
           </p>
         </div>
 
-        {/* Metric cards */}
+        {error && <div className="mb-4 text-sm" style={{ color: '#dc2626' }}>{error}</div>}
+
+        {!assessmentId && (
+          <div className="mb-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+            Complete assessment setup first to collect an evidence snapshot.
+          </div>
+        )}
+
         <div>
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--muted-foreground)' }}>
-              Jira Cloud · CLAIM
+              Jira Cloud · {snapshot?.jira_project_key || '—'}
             </p>
             <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: dark ? '#0f1d40' : '#eef3fa', color: 'var(--muted-foreground)' }}>
-              Fetched 2 hours ago
+              {fetchedLabel}
             </span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
-            {SAMPLE_METRICS.filter(m => m.source === 'jira').map(m => (
-              <MetricCard key={m.label} metric={m} dark={dark} />
+            {jiraMetrics.map(m => (
+              <MetricCard key={m.key} metric={m} dark={dark} />
             ))}
           </div>
 
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--muted-foreground)' }}>
-              Azure DevOps · claims-api
+              Azure DevOps · {snapshot?.ado_repository_name || '—'}
             </p>
             <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: dark ? '#0f1d40' : '#eef3fa', color: 'var(--muted-foreground)' }}>
-              Fetched 2 hours ago
+              {fetchedLabel}
             </span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-            {SAMPLE_METRICS.filter(m => m.source === 'azdo').map(m => (
-              <MetricCard key={m.label} metric={m} dark={dark} />
+            {adoMetrics.map(m => (
+              <MetricCard key={m.key} metric={m} dark={dark} />
             ))}
           </div>
         </div>
 
-        {/* Exclusions */}
         <div
           className="rounded-xl p-5 mb-6"
           style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}
@@ -101,11 +178,13 @@ export default function EvidencePreview({ dark, onNavigate }: Props) {
                 <button
                   key={opt}
                   onClick={() => toggle(opt)}
+                  disabled={!snapshot || snapshot.immutable}
                   className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-base"
                   style={{
                     background: active ? (dark ? '#3b1010' : '#fee2e2') : 'var(--muted)',
                     color: active ? (dark ? '#fca5a5' : '#991b1b') : 'var(--foreground)',
                     border: `1px solid ${active ? (dark ? '#7f1d1d' : '#fca5a5') : cardBorder}`,
+                    opacity: !snapshot || snapshot.immutable ? 0.6 : 1,
                   }}
                 >
                   {active && <X size={11} />}
@@ -125,24 +204,24 @@ export default function EvidencePreview({ dark, onNavigate }: Props) {
           )}
         </div>
 
-        {/* Representative question */}
         <div
           className="rounded-xl p-5 mb-6"
           style={{ background: dark ? '#0f1d40' : '#eef3fa', border: `1px solid ${dark ? '#1e3358' : '#b0c7e6'}` }}
         >
           <p className="font-semibold mb-3" style={{ color: 'var(--foreground)', fontSize: 15 }}>
-            Does this evidence represent how the Claims Integration team normally delivers?
+            Does this evidence represent how the {teamLabel} team normally delivers?
           </p>
           <div className="flex flex-wrap gap-3">
             <button
-              onClick={() => onNavigate('workshop')}
+              onClick={() => void handleConfirm()}
+              disabled={!snapshot || confirming}
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-base"
-              style={{ background: 'var(--primary)', color: '#fff' }}
-              onMouseEnter={e => (e.currentTarget.style.opacity = '0.88')}
-              onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+              style={{ background: 'var(--primary)', color: '#fff', opacity: !snapshot || confirming ? 0.7 : 1 }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = !snapshot || confirming ? '0.7' : '0.88')}
+              onMouseLeave={e => (e.currentTarget.style.opacity = !snapshot || confirming ? '0.7' : '1')}
             >
               <CheckCircle2 size={15} />
-              Looks representative — start assessment
+              {confirming ? 'Confirming…' : 'Looks representative — start assessment'}
             </button>
             <button
               onClick={() => onNavigate('setup')}
@@ -154,7 +233,7 @@ export default function EvidencePreview({ dark, onNavigate }: Props) {
               Adjust scope
             </button>
             <button
-              onClick={handleRefresh}
+              onClick={() => void handleRefresh()}
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-base"
               style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
               onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--ring)')}
@@ -166,26 +245,47 @@ export default function EvidencePreview({ dark, onNavigate }: Props) {
           </div>
         </div>
 
-        {/* State examples */}
         <div className="grid md:grid-cols-2 gap-3">
-          <StateExample type="connection-error" dark={dark} />
-          <StateExample type="no-activity" dark={dark} />
-          <StateExample type="incomplete-adoption" dark={dark} />
-          <StateExample type="unrepresentative" dark={dark} />
+          <StateExample
+            type="connection-error"
+            dark={dark}
+            active={qualityStates.has('connection_failure')}
+            message={(snapshot?.limitations || []).find(l => l.code === 'connection_failure')?.message}
+          />
+          <StateExample
+            type="no-activity"
+            dark={dark}
+            active={qualityStates.has('no_activity')}
+            message={(snapshot?.limitations || []).find(l => l.code === 'no_activity')?.message}
+          />
+          <StateExample
+            type="incomplete-adoption"
+            dark={dark}
+            active={qualityStates.has('incomplete_tool_adoption') || qualityStates.has('incomplete_adoption')}
+            message={(snapshot?.limitations || []).find(l => l.code === 'incomplete_tool_adoption')?.message}
+          />
+          <StateExample
+            type="unrepresentative"
+            dark={dark}
+            active={qualityStates.has('unrepresentative_selection') || qualityStates.has('unrepresentative')}
+            message={(snapshot?.limitations || []).find(l => l.code === 'unrepresentative_selection')?.message}
+          />
         </div>
       </div>
     </div>
   )
 }
 
-function MetricCard({ metric, dark }: { metric: typeof SAMPLE_METRICS[0]; dark: boolean }) {
+function MetricCard({ metric, dark }: { metric: EvidenceMetric; dark: boolean }) {
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
-  const sourceBg = metric.source === 'jira'
+  const isJira = metric.source_system === 'jira'
+  const sourceBg = isJira
     ? (dark ? '#0f1d40' : '#eef3fa')
     : (dark ? '#141f35' : '#f0fdfc')
-  const sourceColor = metric.source === 'jira'
+  const sourceColor = isJira
     ? (dark ? '#7ea4d3' : '#1b3a6b')
     : (dark ? '#5de8e0' : '#0e7170')
+  const trend = metric.trend
 
   return (
     <div
@@ -197,14 +297,14 @@ function MetricCard({ metric, dark }: { metric: typeof SAMPLE_METRICS[0]; dark: 
           className="text-xs px-1.5 py-0.5 rounded font-medium"
           style={{ background: sourceBg, color: sourceColor, fontSize: 10 }}
         >
-          {metric.source === 'jira' ? 'Jira' : 'ADO'}
+          {isJira ? 'Jira' : 'ADO'}
         </span>
-        {metric.trend === 'up' && <TrendingUp size={13} style={{ color: '#10b981' }} />}
-        {metric.trend === 'down' && <TrendingDown size={13} style={{ color: '#f59e0b' }} />}
-        {metric.trend === 'neutral' && <Minus size={13} style={{ color: 'var(--muted-foreground)' }} />}
+        {trend === 'up' && <TrendingUp size={13} style={{ color: '#10b981' }} />}
+        {trend === 'down' && <TrendingDown size={13} style={{ color: '#f59e0b' }} />}
+        {trend === 'neutral' && <Minus size={13} style={{ color: 'var(--muted-foreground)' }} />}
       </div>
       <div className="font-semibold font-mono text-xl mb-1" style={{ color: 'var(--foreground)' }}>
-        {metric.value}
+        {metric.value_text}
       </div>
       <div className="text-xs" style={{ color: 'var(--muted-foreground)', lineHeight: 1.4 }}>
         {metric.label}
@@ -213,7 +313,17 @@ function MetricCard({ metric, dark }: { metric: typeof SAMPLE_METRICS[0]; dark: 
   )
 }
 
-function StateExample({ type, dark }: { type: string; dark: boolean }) {
+function StateExample({
+  type,
+  dark,
+  active,
+  message,
+}: {
+  type: string
+  dark: boolean
+  active?: boolean
+  message?: string
+}) {
   const configs = {
     'connection-error': {
       icon: <XCircle size={15} />,
@@ -252,12 +362,16 @@ function StateExample({ type, dark }: { type: string; dark: boolean }) {
   return (
     <div
       className="rounded-xl p-3.5 flex items-start gap-2.5"
-      style={{ background: c.bg, border: `1px solid ${c.border}` }}
+      style={{
+        background: c.bg,
+        border: `1px solid ${c.border}`,
+        opacity: active ? 1 : 0.55,
+      }}
     >
       <span style={{ color: c.color, marginTop: 1, flexShrink: 0 }}>{c.icon}</span>
       <div>
         <p className="text-xs font-semibold mb-0.5" style={{ color: c.color }}>{c.title}</p>
-        <p className="text-xs" style={{ color: c.color, opacity: 0.85, lineHeight: 1.5 }}>{c.desc}</p>
+        <p className="text-xs" style={{ color: c.color, opacity: 0.85, lineHeight: 1.5 }}>{message || c.desc}</p>
       </div>
     </div>
   )

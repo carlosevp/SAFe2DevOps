@@ -5,29 +5,73 @@ import json
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_session, require_admin
+from app.api.deps import get_db_session, require_admin, require_admin_or_dev_mock
 from app.models.enums import AssessmentStatus
 from app.schemas.assessment import (
     AdminScoreUpdate,
     AssessmentCreate,
     AssessmentSourceSelectionIn,
     AssessmentSummary,
+    EvidenceExclusionsIn,
+    EvidenceLimitationOut,
+    EvidenceMetricOut,
+    EvidenceSnapshotOut,
     LifecycleTransitionRequest,
     PracticeCoverageAdmin,
     PracticeCoverageParticipant,
     PublishedReportOut,
 )
 from app.services.assessment import AssessmentService
+from app.services.evidence import EvidenceService
 from app.services.lifecycle import LifecycleService
 from app.services.publication import PublicationService
 
 router = APIRouter(prefix="/assessments", tags=["assessments"])
 
 
+def _snapshot_out(snapshot) -> EvidenceSnapshotOut:
+    return EvidenceSnapshotOut(
+        id=snapshot.id,
+        assessment_id=snapshot.assessment_id,
+        lookback_days=snapshot.lookback_days,
+        collected_at=snapshot.collected_at,
+        jira_project_key=snapshot.jira_project_key,
+        ado_repository_name=snapshot.ado_repository_name,
+        provenance_summary=snapshot.provenance_summary,
+        payload_ref=snapshot.raw_payload_ref,
+        payload_checksum=snapshot.payload_checksum,
+        quality=snapshot.quality,
+        immutable=snapshot.immutable,
+        is_representative=snapshot.is_representative,
+        metrics=[
+            EvidenceMetricOut(
+                key=m.key,
+                label=m.label,
+                value_text=m.value_text,
+                value_numeric=m.value_numeric,
+                source_system=m.source_system,
+                trend=m.trend,
+                freshness_label=m.freshness_label,
+            )
+            for m in snapshot.metrics
+        ],
+        limitations=[
+            EvidenceLimitationOut(code=item.code, message=item.message, source_system=item.source_system)
+            for item in snapshot.limitations
+        ],
+        exclusions=[item.scope_label for item in snapshot.exclusions],
+    )
+
+
+@router.get("/status-values", response_model=list[str])
+def status_values() -> list[str]:
+    return [status.value for status in AssessmentStatus]
+
+
 @router.post("", response_model=AssessmentSummary)
 def create_assessment(
     body: AssessmentCreate,
-    _: dict[str, str] = Depends(require_admin),
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> AssessmentSummary:
     service = AssessmentService(db)
@@ -38,18 +82,28 @@ def create_assessment(
 
 @router.get("", response_model=list[AssessmentSummary])
 def list_assessments(
-    _: dict[str, str] = Depends(require_admin),
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> list[AssessmentSummary]:
     service = AssessmentService(db)
     return [AssessmentSummary.model_validate(item) for item in service.repo.list_all()]
 
 
+@router.get("/{assessment_id}", response_model=AssessmentSummary)
+def get_assessment(
+    assessment_id: str,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> AssessmentSummary:
+    assessment = AssessmentService(db)._require(assessment_id)
+    return AssessmentSummary.model_validate(assessment)
+
+
 @router.post("/{assessment_id}/source-selection", response_model=AssessmentSummary)
 def set_source_selection(
     assessment_id: str,
     body: AssessmentSourceSelectionIn,
-    _: dict[str, str] = Depends(require_admin),
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> AssessmentSummary:
     service = AssessmentService(db)
@@ -60,11 +114,76 @@ def set_source_selection(
     return AssessmentSummary.model_validate(assessment)
 
 
+@router.post("/{assessment_id}/evidence/collect", response_model=EvidenceSnapshotOut)
+def collect_evidence(
+    assessment_id: str,
+    refresh: bool = False,
+    admin: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> EvidenceSnapshotOut:
+    snapshot = EvidenceService(db).collect_snapshot(
+        assessment_id, actor=admin.get("subject", "admin"), refresh=refresh
+    )
+    db.commit()
+    return _snapshot_out(snapshot)
+
+
+@router.get("/{assessment_id}/evidence/latest", response_model=EvidenceSnapshotOut)
+def latest_evidence(
+    assessment_id: str,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> EvidenceSnapshotOut:
+    snapshot = EvidenceService(db).get_latest_snapshot(assessment_id)
+    if snapshot is None:
+        from app.core.errors import AppError
+
+        raise AppError(code="snapshot_not_found", message="No evidence snapshot yet", status_code=404)
+    return _snapshot_out(snapshot)
+
+
+@router.post("/{assessment_id}/evidence/{snapshot_id}/exclusions", response_model=EvidenceSnapshotOut)
+def apply_exclusions(
+    assessment_id: str,
+    snapshot_id: str,
+    body: EvidenceExclusionsIn,
+    admin: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> EvidenceSnapshotOut:
+    service = EvidenceService(db)
+    snapshot = service.get_snapshot(snapshot_id)
+    if snapshot.assessment_id != assessment_id:
+        from app.core.errors import AppError
+
+        raise AppError(code="snapshot_mismatch", message="Snapshot does not belong to assessment", status_code=400)
+    updated = service.apply_exclusions(snapshot_id, body.exclusions, excluded_by=admin.get("subject", "admin"))
+    db.commit()
+    return _snapshot_out(updated)
+
+
+@router.post("/{assessment_id}/evidence/{snapshot_id}/confirm", response_model=EvidenceSnapshotOut)
+def confirm_evidence(
+    assessment_id: str,
+    snapshot_id: str,
+    admin: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> EvidenceSnapshotOut:
+    service = EvidenceService(db)
+    snapshot = service.get_snapshot(snapshot_id)
+    if snapshot.assessment_id != assessment_id:
+        from app.core.errors import AppError
+
+        raise AppError(code="snapshot_mismatch", message="Snapshot does not belong to assessment", status_code=400)
+    confirmed = service.confirm_snapshot(snapshot_id, actor=admin.get("subject", "admin"))
+    db.commit()
+    return _snapshot_out(confirmed)
+
+
 @router.post("/{assessment_id}/transition", response_model=AssessmentSummary)
 def transition_assessment(
     assessment_id: str,
     body: LifecycleTransitionRequest,
-    admin: dict[str, str] = Depends(require_admin),
+    admin: dict[str, str] = Depends(require_admin_or_dev_mock),
     db: Session = Depends(get_db_session),
 ) -> AssessmentSummary:
     service = AssessmentService(db)
@@ -171,8 +290,3 @@ def publish_assessment(
         published_at=report.published_at,
         immutable=True,
     )
-
-
-@router.get("/status-values", response_model=list[str])
-def status_values() -> list[str]:
-    return [status.value for status in AssessmentStatus]

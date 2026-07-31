@@ -1,5 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Eye, EyeOff, CheckCircle2, XCircle, RefreshCw, AlertCircle, Lock, Info } from 'lucide-react'
+import {
+  getIntegrations,
+  refreshCatalog,
+  saveAdoCredentials,
+  saveJiraCredentials,
+  testAdoConnection,
+  testJiraConnection,
+  type IntegrationStatus,
+} from '../lib/api'
 import type { Screen } from '../types'
 
 interface Props {
@@ -7,55 +16,88 @@ interface Props {
   onNavigate: (s: Screen) => void
 }
 
-type ConnStatus = 'connected' | 'error' | 'idle' | 'testing'
+type ConnStatus = 'connected' | 'error' | 'idle' | 'testing' | 'unknown' | 'failed'
 
-function MaskedInput({ value, placeholder }: { value: string; placeholder: string }) {
+function mapStatus(value?: string | null): ConnStatus {
+  if (value === 'connected') return 'connected'
+  if (value === 'failed') return 'failed'
+  if (value === 'testing') return 'testing'
+  if (value === 'unknown') return 'unknown'
+  return 'idle'
+}
+
+function formatValidated(iso: string | null): string {
+  if (!iso) return 'Not yet tested'
+  const dt = new Date(iso)
+  return `Validated ${dt.toLocaleString()}`
+}
+
+function FieldInput({
+  value,
+  placeholder,
+  secret,
+  onChange,
+}: {
+  value: string
+  placeholder: string
+  secret?: boolean
+  onChange: (v: string) => void
+}) {
   const [show, setShow] = useState(false)
   return (
     <div className="relative">
       <input
-        type={show ? 'text' : 'password'}
-        defaultValue={value}
+        type={secret && !show ? 'password' : 'text'}
+        value={value}
         placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
         className="w-full rounded-lg px-3 py-2.5 text-sm pr-10 outline-none transition-base"
         style={{
           background: 'var(--muted)',
           border: '1px solid var(--border)',
           color: 'var(--foreground)',
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 13,
+          fontFamily: secret ? 'JetBrains Mono, monospace' : undefined,
+          fontSize: secret ? 13 : undefined,
         }}
         onFocus={e => (e.currentTarget.style.borderColor = 'var(--ring)')}
         onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
       />
-      <button
-        className="absolute right-3 top-1/2 -translate-y-1/2 transition-base"
-        style={{ color: 'var(--muted-foreground)' }}
-        onClick={() => setShow(s => !s)}
-        type="button"
-      >
-        {show ? <EyeOff size={15} /> : <Eye size={15} />}
-      </button>
+      {secret && (
+        <button
+          className="absolute right-3 top-1/2 -translate-y-1/2 transition-base"
+          style={{ color: 'var(--muted-foreground)' }}
+          onClick={() => setShow(s => !s)}
+          type="button"
+        >
+          {show ? <EyeOff size={15} /> : <Eye size={15} />}
+        </button>
+      )}
     </div>
   )
 }
 
-function StatusBadge({ status }: { status: ConnStatus }) {
-  if (status === 'connected') return (
-    <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#059669' }}>
-      <CheckCircle2 size={13} /> Connected · Validated 2 hours ago
-    </span>
-  )
-  if (status === 'error') return (
-    <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#dc2626' }}>
-      <XCircle size={13} /> Connection failed — check credentials
-    </span>
-  )
-  if (status === 'testing') return (
-    <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-      <RefreshCw size={13} className="animate-spin" /> Testing connection…
-    </span>
-  )
+function StatusBadge({ status, validatedAt }: { status: ConnStatus; validatedAt: string | null }) {
+  if (status === 'connected') {
+    return (
+      <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#059669' }}>
+        <CheckCircle2 size={13} /> Connected · {formatValidated(validatedAt)}
+      </span>
+    )
+  }
+  if (status === 'failed' || status === 'error') {
+    return (
+      <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#dc2626' }}>
+        <XCircle size={13} /> Connection failed — check credentials
+      </span>
+    )
+  }
+  if (status === 'testing') {
+    return (
+      <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+        <RefreshCw size={13} className="animate-spin" /> Testing connection…
+      </span>
+    )
+  }
   return (
     <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
       <AlertCircle size={13} /> Not yet tested
@@ -63,132 +105,94 @@ function StatusBadge({ status }: { status: ConnStatus }) {
   )
 }
 
-function IntegrationCard({
-  title,
-  logo,
-  fields,
-  status,
-  onTest,
-  dark,
-  permissionsNote,
-}: {
-  title: string
-  logo: string
-  fields: { label: string; type: 'text' | 'secret'; placeholder: string; value: string }[]
-  status: ConnStatus
-  onTest: () => void
-  dark: boolean
-  permissionsNote: string
-}) {
-  const cardBorder = dark ? '#1e3358' : '#e2e8f0'
-  return (
-    <div
-      className="rounded-xl p-6"
-      style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}
-    >
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold"
-            style={{ background: dark ? '#1a2540' : '#eef3fa', color: 'var(--primary)' }}
-          >
-            {logo}
-          </div>
-          <div>
-            <h3 className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>{title}</h3>
-            <StatusBadge status={status} />
-          </div>
-        </div>
-        {status === 'connected' && (
-          <div
-            className="w-2.5 h-2.5 rounded-full"
-            style={{ background: '#10b981', boxShadow: '0 0 0 3px rgba(16,185,129,0.2)' }}
-          />
-        )}
-      </div>
-
-      <div className="space-y-4">
-        {fields.map(f => (
-          <div key={f.label}>
-            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>
-              {f.label}
-            </label>
-            {f.type === 'secret' ? (
-              <MaskedInput value={f.value} placeholder={f.placeholder} />
-            ) : (
-              <input
-                type="text"
-                defaultValue={f.value}
-                placeholder={f.placeholder}
-                className="w-full rounded-lg px-3 py-2.5 text-sm outline-none transition-base"
-                style={{
-                  background: 'var(--muted)',
-                  border: '1px solid var(--border)',
-                  color: 'var(--foreground)',
-                }}
-                onFocus={e => (e.currentTarget.style.borderColor = 'var(--ring)')}
-                onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-              />
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div
-        className="mt-4 rounded-lg p-3 flex items-start gap-2"
-        style={{ background: dark ? '#141f35' : '#f8fafc', border: `1px solid ${cardBorder}` }}
-      >
-        <Lock size={13} style={{ color: 'var(--muted-foreground)', marginTop: 1, flexShrink: 0 }} />
-        <p className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
-          {permissionsNote}
-        </p>
-      </div>
-
-      <div className="flex items-center justify-between mt-4">
-        <button
-          onClick={onTest}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-base"
-          style={{
-            background: 'var(--primary)',
-            color: '#fff',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.opacity = '0.88')}
-          onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-        >
-          Test connection
-        </button>
-        <button
-          className="text-sm transition-base px-3 py-2 rounded-lg"
-          style={{ color: 'var(--muted-foreground)' }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'var(--muted)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-        >
-          Save
-        </button>
-      </div>
-    </div>
-  )
-}
-
 export default function Integrations({ dark, onNavigate }: Props) {
-  const [jiraStatus, setJiraStatus] = useState<ConnStatus>('connected')
-  const [azdoStatus, setAzdoStatus] = useState<ConnStatus>('connected')
+  const [status, setStatus] = useState<IntegrationStatus | null>(null)
+  const [jiraStatus, setJiraStatus] = useState<ConnStatus>('idle')
+  const [adoStatus, setAdoStatus] = useState<ConnStatus>('idle')
   const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [jiraUrl, setJiraUrl] = useState('')
+  const [jiraEmail, setJiraEmail] = useState('')
+  const [jiraToken, setJiraToken] = useState('')
+  const [adoUrl, setAdoUrl] = useState('')
+  const [adoPat, setAdoPat] = useState('')
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
 
-  function handleTest(which: 'jira' | 'azdo') {
-    if (which === 'jira') {
-      setJiraStatus('testing')
-      setTimeout(() => setJiraStatus('connected'), 1800)
-    } else {
-      setAzdoStatus('testing')
-      setTimeout(() => setAzdoStatus('connected'), 1800)
+  useEffect(() => {
+    getIntegrations()
+      .then(data => {
+        setStatus(data)
+        setJiraStatus(mapStatus(data.jira_status))
+        setAdoStatus(mapStatus(data.ado_status))
+        setJiraUrl(data.jira_site_url || '')
+        setJiraEmail(data.jira_service_account_email || '')
+        setAdoUrl(data.ado_org_url || '')
+        // Secrets never returned after save.
+        setJiraToken('')
+        setAdoPat('')
+      })
+      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load integrations'))
+  }, [])
+
+  async function saveJira() {
+    setError(null)
+    const data = await saveJiraCredentials({
+      site_url: jiraUrl,
+      service_account_email: jiraEmail,
+      api_token: jiraToken || undefined,
+    })
+    setStatus(data)
+    setJiraStatus(mapStatus(data.jira_status))
+    setJiraToken('')
+  }
+
+  async function saveAdo() {
+    setError(null)
+    const data = await saveAdoCredentials({
+      org_url: adoUrl,
+      pat: adoPat || undefined,
+    })
+    setStatus(data)
+    setAdoStatus(mapStatus(data.ado_status))
+    setAdoPat('')
+  }
+
+  async function handleTest(which: 'jira' | 'azdo') {
+    setError(null)
+    try {
+      if (which === 'jira') {
+        setJiraStatus('testing')
+        await saveJira()
+        await testJiraConnection()
+        const data = await getIntegrations()
+        setStatus(data)
+        setJiraStatus(mapStatus(data.jira_status))
+      } else {
+        setAdoStatus('testing')
+        await saveAdo()
+        await testAdoConnection()
+        const data = await getIntegrations()
+        setStatus(data)
+        setAdoStatus(mapStatus(data.ado_status))
+      }
+    } catch (err) {
+      if (which === 'jira') setJiraStatus('failed')
+      else setAdoStatus('failed')
+      setError(err instanceof Error ? err.message : 'Connection test failed')
     }
   }
 
-  function handleRefresh() {
+  async function handleRefresh() {
     setRefreshing(true)
-    setTimeout(() => setRefreshing(false), 2000)
+    setError(null)
+    try {
+      const data = await refreshCatalog()
+      setStatus(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Catalog refresh failed')
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   return (
@@ -213,41 +217,103 @@ export default function Integrations({ dark, onNavigate }: Props) {
           <Info size={15} style={{ color: '#0f8b8d', marginTop: 1, flexShrink: 0 }} />
           <p className="text-sm" style={{ color: dark ? '#5de8e0' : '#0e7170', lineHeight: 1.6 }}>
             The pilot supports one Jira Cloud environment and one Azure DevOps Services environment. Both must be configured before starting an assessment.
+            {status?.provider_mode === 'mock' ? ' Mock providers are active for local/demo use.' : ''}
           </p>
         </div>
 
+        {error && (
+          <div className="mb-4 text-sm" style={{ color: '#dc2626' }}>{error}</div>
+        )}
+
         <div className="space-y-5 mb-6">
-          <IntegrationCard
-            title="Jira Cloud"
-            logo="JC"
-            dark={dark}
-            status={jiraStatus}
-            onTest={() => handleTest('jira')}
-            permissionsNote="Requires read-only access: browse_projects, view_workflow_transition. Service account credentials are encrypted at rest and never displayed in full after saving."
-            fields={[
-              { label: 'Jira site URL', type: 'text', placeholder: 'https://yourorg.atlassian.net', value: 'https://claimsco.atlassian.net' },
-              { label: 'Service account email', type: 'text', placeholder: 'svc-maturity@yourorg.com', value: 'svc-maturity@claimsco.com' },
-              { label: 'API token', type: 'secret', placeholder: 'Enter API token…', value: 'ATATTxxxxxxxxxxxxxxxx' },
-            ]}
-          />
-          <IntegrationCard
-            title="Azure DevOps Services"
-            logo="AZ"
-            dark={dark}
-            status={azdoStatus}
-            onTest={() => handleTest('azdo')}
-            permissionsNote="Requires read-only PAT scopes: Code (Read), Build (Read), Release (Read). Tokens are never echoed back after initial save."
-            fields={[
-              { label: 'Organization URL', type: 'text', placeholder: 'https://dev.azure.com/yourorg', value: 'https://dev.azure.com/claimsco' },
-              { label: 'Personal access token', type: 'secret', placeholder: 'Enter PAT…', value: 'xxxxxxxxxxxxxxxxxxxxxxxx' },
-            ]}
-          />
+          <div className="rounded-xl p-6" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold" style={{ background: dark ? '#1a2540' : '#eef3fa', color: 'var(--primary)' }}>JC</div>
+                <div>
+                  <h3 className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>Jira Cloud</h3>
+                  <StatusBadge status={jiraStatus} validatedAt={status?.jira_last_validated_at || null} />
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>Jira site URL</label>
+                <FieldInput value={jiraUrl} placeholder="https://yourorg.atlassian.net" onChange={setJiraUrl} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>Service account email</label>
+                <FieldInput value={jiraEmail} placeholder="svc-maturity@yourorg.com" onChange={setJiraEmail} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>API token</label>
+                <FieldInput
+                  value={jiraToken}
+                  placeholder={status?.jira_token_configured ? 'Configured — enter new token to rotate' : 'Enter API token…'}
+                  secret
+                  onChange={setJiraToken}
+                />
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg p-3 flex items-start gap-2" style={{ background: dark ? '#141f35' : '#f8fafc', border: `1px solid ${cardBorder}` }}>
+              <Lock size={13} style={{ color: 'var(--muted-foreground)', marginTop: 1, flexShrink: 0 }} />
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+                {status?.jira_permissions_note || 'Requires read-only Jira access. Tokens are encrypted at rest and never returned after save.'}
+              </p>
+            </div>
+            <div className="flex items-center justify-between mt-4">
+              <button onClick={() => handleTest('jira')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium" style={{ background: 'var(--primary)', color: '#fff' }}>
+                Test connection
+              </button>
+              <button onClick={() => saveJira().catch(err => setError(err.message))} className="text-sm px-3 py-2 rounded-lg" style={{ color: 'var(--muted-foreground)' }}>
+                Save
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl p-6" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold" style={{ background: dark ? '#1a2540' : '#eef3fa', color: 'var(--primary)' }}>AZ</div>
+                <div>
+                  <h3 className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>Azure DevOps Services</h3>
+                  <StatusBadge status={adoStatus} validatedAt={status?.ado_last_validated_at || null} />
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>Organization URL</label>
+                <FieldInput value={adoUrl} placeholder="https://dev.azure.com/yourorg" onChange={setAdoUrl} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>Personal access token</label>
+                <FieldInput
+                  value={adoPat}
+                  placeholder={status?.ado_pat_configured ? 'Configured — enter new PAT to rotate' : 'Enter PAT…'}
+                  secret
+                  onChange={setAdoPat}
+                />
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg p-3 flex items-start gap-2" style={{ background: dark ? '#141f35' : '#f8fafc', border: `1px solid ${cardBorder}` }}>
+              <Lock size={13} style={{ color: 'var(--muted-foreground)', marginTop: 1, flexShrink: 0 }} />
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+                {status?.ado_permissions_note || 'Requires read-only PAT scopes. Tokens are never echoed after save.'}
+              </p>
+            </div>
+            <div className="flex items-center justify-between mt-4">
+              <button onClick={() => handleTest('azdo')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium" style={{ background: 'var(--primary)', color: '#fff' }}>
+                Test connection
+              </button>
+              <button onClick={() => saveAdo().catch(err => setError(err.message))} className="text-sm px-3 py-2 rounded-lg" style={{ color: 'var(--muted-foreground)' }}>
+                Save
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div
-          className="rounded-xl p-5 flex items-center justify-between"
-          style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}
-        >
+        <div className="rounded-xl p-5 flex items-center justify-between" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
           <div>
             <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>Refresh available projects and repositories</p>
             <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
@@ -258,8 +324,6 @@ export default function Integrations({ dark, onNavigate }: Props) {
             onClick={handleRefresh}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-base ml-4 shrink-0"
             style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--ring)')}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = cardBorder)}
           >
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
             {refreshing ? 'Refreshing…' : 'Refresh'}

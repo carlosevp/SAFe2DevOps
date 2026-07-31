@@ -24,6 +24,10 @@ class EvidenceSnapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     provenance_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # Keep normalized references only; avoid bloating SQLite with raw payloads.
     raw_payload_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    payload_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    quality: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    immutable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    superseded_by_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     is_representative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

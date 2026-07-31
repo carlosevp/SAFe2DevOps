@@ -17,6 +17,8 @@ const ASSESSMENT_SCREENS: Screen[] = ['setup', 'evidence', 'workshop', 'checkpoi
 export default function App() {
   const [screen, setScreen] = useState<Screen>('welcome')
   const [dark, setDark] = useState(false)
+  const [assessmentId, setAssessmentId] = useState<string | null>(null)
+  const [assessmentName, setAssessmentName] = useState('Claims Integration')
 
   useEffect(() => {
     if (dark) {
@@ -26,7 +28,7 @@ export default function App() {
     }
   }, [dark])
 
-  const assessmentName = ASSESSMENT_SCREENS.includes(screen) ? 'Claims Integration' : undefined
+  const headerAssessmentName = ASSESSMENT_SCREENS.includes(screen) ? assessmentName : undefined
   const isRemote = screen === 'remote-contributor'
 
   // Remote contributor has its own minimal layout
@@ -47,7 +49,7 @@ export default function App() {
         dark={dark}
         onToggleDark={() => setDark(d => !d)}
         screen={screen}
-        assessmentName={assessmentName}
+        assessmentName={headerAssessmentName}
         onNavigate={setScreen}
         onSaveExit={() => setScreen('welcome')}
       />
@@ -59,10 +61,22 @@ export default function App() {
         <Integrations dark={dark} onNavigate={setScreen} />
       )}
       {screen === 'setup' && (
-        <SetupWizard dark={dark} onNavigate={setScreen} />
+        <SetupWizard
+          dark={dark}
+          onNavigate={setScreen}
+          onAssessmentReady={(id, name) => {
+            setAssessmentId(id)
+            setAssessmentName(name)
+          }}
+        />
       )}
       {screen === 'evidence' && (
-        <EvidencePreview dark={dark} onNavigate={setScreen} />
+        <EvidencePreview
+          dark={dark}
+          onNavigate={setScreen}
+          assessmentId={assessmentId}
+          assessmentName={assessmentName}
+        />
       )}
       {(screen === 'workshop' || screen === 'checkpoint') && (
         <div style={{ position: 'relative' }}>

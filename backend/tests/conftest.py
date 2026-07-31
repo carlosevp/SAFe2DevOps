@@ -44,6 +44,7 @@ def app_env(tmp_data_dir: Path, admin_password: str, tmp_path: Path) -> Generato
         "CORS_ORIGINS": "http://testserver",
         "LOG_LEVEL": "WARNING",
         "ASSESSMENT_CONFIG_PATH": str(repo_root / "config" / "assessment" / "assessment_model.yaml"),
+        "INTEGRATION_PROVIDER": "mock",
     }
     previous = {key: os.environ.get(key) for key in env}
     os.environ.update(env)

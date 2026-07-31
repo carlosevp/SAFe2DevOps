@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     assessment_config_path: Path | None = None
     log_level: str = "INFO"
     seed_demo_data: bool = False
+    integration_provider: Literal["mock", "live"] = "mock"
 
     @field_validator(
         "data_dir",

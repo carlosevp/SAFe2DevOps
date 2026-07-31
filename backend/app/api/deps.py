@@ -36,12 +36,18 @@ def require_admin(
     return auth.require_admin(cookie)
 
 
-def require_admin_or_raise(
+def require_admin_or_dev_mock(
     request: Request,
     settings: Settings = Depends(settings_dep),
     auth: AdminAuthService = Depends(admin_auth_dep),
 ) -> dict[str, str]:
-    try:
-        return require_admin(request, settings, auth)
-    except AppError:
-        raise
+    """Allow mock-host access in local/test mock mode for Figma wiring."""
+    if settings.integration_provider == "mock" and settings.app_env in {"development", "test"}:
+        cookie = request.cookies.get(settings.session_cookie_name)
+        if cookie:
+            try:
+                return auth.require_admin(cookie)
+            except AppError:
+                pass
+        return {"role": "admin", "subject": "mock-host"}
+    return require_admin(request, settings, auth)
