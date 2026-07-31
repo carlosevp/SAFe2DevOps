@@ -45,6 +45,7 @@ def _base_env() -> list[str]:
 
 @pytest.mark.skipif(not _docker_available(), reason="Set RUN_DOCKER_TESTS=1 with Docker available")
 def test_container_runs_with_arbitrary_non_root_uid(built_image: str) -> None:
+    # Override image ENTRYPOINT so the probe command is not appended to container_entrypoint.sh.
     result = subprocess.run(
         [
             "docker",
@@ -52,9 +53,10 @@ def test_container_runs_with_arbitrary_non_root_uid(built_image: str) -> None:
             "--rm",
             "--user",
             "12345:0",
+            "--entrypoint",
+            "python",
             *_base_env(),
             built_image,
-            "python",
             "-c",
             "import os; assert os.getuid()==12345; from pathlib import Path; "
             "p=Path('/data/db'); p.mkdir(parents=True, exist_ok=True); "
