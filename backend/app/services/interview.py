@@ -14,7 +14,13 @@ from app.core.errors import AppError
 from app.integrations.http import sanitize_remote_text
 from app.models import Assessment, InterviewTurn
 from app.models.ai_settings import InterviewSession
-from app.models.enums import AssessmentStatus, CoverageState, InterviewTurnSource, InterviewTurnType
+from app.models.enums import (
+    AssessmentStatus,
+    CoverageState,
+    InterviewTurnSource,
+    InterviewTurnType,
+    StandardFindingStatus,
+)
 from app.openai.factory import get_interview_provider
 from app.repositories.assessment import AssessmentRepository
 from app.schemas.interview import (
@@ -27,6 +33,7 @@ from app.schemas.interview import (
 )
 from app.services.ai_settings import AiSettingsService
 from app.services.audit import AuditService
+from app.services.enterprise_standards import EnterpriseStandardsService
 from app.services.evidence import EvidenceService
 from app.services.lifecycle import LifecycleService
 from app.services.storage import StorageService
@@ -43,6 +50,7 @@ class InterviewService:
         self.settings = get_settings()
         self.model = get_assessment_model_config()
         self.storage = StorageService(self.settings)
+        self.enterprise = EnterpriseStandardsService(db)
 
     def start(self, assessment_id: str, *, actor: str = "admin") -> InterviewSessionOut:
         assessment = self._require(assessment_id)
@@ -55,6 +63,9 @@ class InterviewService:
                 message="Interview can start only from evidence_ready",
                 status_code=409,
             )
+
+        # Immutable applicable-standard snapshots for this assessment interview.
+        self.enterprise.snapshot_applicable(assessment_id)
 
         self.lifecycle.transition(
             assessment, AssessmentStatus.INTERVIEW_ACTIVE, actor_subject=actor
@@ -236,6 +247,10 @@ class InterviewService:
         self.db.flush()
 
         self._apply_practice_updates(assessment, analysis, turn_id=turn.id)
+        if analysis.standard_updates:
+            self.enterprise.apply_standard_updates_from_analysis(
+                assessment.id, analysis.standard_updates, turn_id=turn.id
+            )
         confirmation = self._coverage_confirmation(analysis)
 
         # Clarification rounds cap
@@ -405,6 +420,10 @@ class InterviewService:
         self.db.add(turn)
         self.db.flush()
         self._apply_practice_updates(assessment, analysis, turn_id=turn.id)
+        if analysis.standard_updates:
+            self.enterprise.apply_standard_updates_from_analysis(
+                assessment.id, analysis.standard_updates, turn_id=turn.id
+            )
 
         # Restore host screen fields — remote include must not advance the workshop.
         session.current_question = frozen_question
@@ -608,9 +627,28 @@ class InterviewService:
                 message="Clarification requested without a clarification question",
                 status_code=502,
             )
+        # Unknown standard keys are rejected; known keys sanitized.
+        cleaned_standards = []
+        for update in analysis.standard_updates:
+            cleaned_standards.append(
+                update.model_copy(
+                    update={
+                        "evidence_summary": sanitize_remote_text(
+                            update.evidence_summary, max_len=4000
+                        ),
+                        "recommendation_candidate": sanitize_remote_text(
+                            update.recommendation_candidate, max_len=4000
+                        ),
+                        "missing_evidence": [
+                            sanitize_remote_text(m, max_len=400) for m in update.missing_evidence
+                        ][:12],
+                    }
+                )
+            )
         return analysis.model_copy(
             update={
                 "practice_updates": cleaned_updates,
+                "standard_updates": cleaned_standards,
                 "response_summary": sanitize_remote_text(analysis.response_summary, max_len=4000),
                 "overall_coverage_summary": sanitize_remote_text(
                     analysis.overall_coverage_summary, max_len=4000
@@ -720,6 +758,10 @@ class InterviewService:
                     "evidence": contras[0],
                     "topic": domain.short_name,
                 }
+        # Priority 3b: combined SAFe + enterprise standard coverage
+        enterprise_q = self._select_enterprise_combined_question(assessment, analysis)
+        if enterprise_q is not None:
+            return enterprise_q
         # Priority 4/6: uncovered + domain balance
         touched_domains = {
             c.domain_key
@@ -784,14 +826,75 @@ class InterviewService:
             "tool_signals": tool_signals,
             "required_dimensions": list(self.model.required_evaluation_dimensions),
             "question_priority_guidance": [
-                "uncovered required rubric dimensions",
-                "low-confidence practices",
+                "remaining SAFe coverage",
+                "applicable enterprise standards",
+                "questions that cover both SAFe and enterprise needs",
                 "human/tool contradictions",
-                "questions covering several practices",
-                "context from most recent answer",
-                "remaining domain balance",
+                "missing evidence",
+                "assessment fatigue and existing question count",
             ],
+            **self.enterprise.interview_context_payload(assessment.id),
         }
+
+    def _select_enterprise_combined_question(
+        self, assessment: Assessment, analysis: InterviewAnalysisAI
+    ) -> dict[str, str] | None:
+        """Prefer one question that advances both SAFe practices and an open standard."""
+        findings = self.enterprise.list_findings(assessment.id)
+        open_findings = [
+            f
+            for f in findings
+            if f.status
+            in {
+                StandardFindingStatus.INSUFFICIENT_EVIDENCE,
+                StandardFindingStatus.FINDING,
+                StandardFindingStatus.PARTIALLY_ALIGNED,
+            }
+        ]
+        if not open_findings:
+            return None
+        coverages = {c.practice_key: c for c in assessment.practice_coverages}
+        for finding in open_findings:
+            for practice_key in finding.mapped_practice_keys:
+                cov = coverages.get(practice_key)
+                if cov is None:
+                    continue
+                if cov.coverage_state in {
+                    CoverageState.NOT_DISCUSSED.value,
+                    CoverageState.PARTIAL.value,
+                    CoverageState.CLARIFY.value,
+                }:
+                    practice = self.model.require_practice(practice_key)
+                    guidance = ""
+                    for snap in self.enterprise.list_snapshots(assessment.id):
+                        if snap.stable_key == finding.stable_key:
+                            guidance = snap.definition.get("primary_interview_guidance") or ""
+                            break
+                    question = (
+                        f"{self._evidence_blurb(assessment)}. "
+                        f"{guidance or practice.question_seeds[0].text} "
+                        f"Also help us understand alignment with the enterprise standard "
+                        f"“{finding.title}”."
+                    )
+                    if analysis.next_best_question and len(analysis.next_best_question) > 40:
+                        # Prefer model combined suggestion when it already bridges both.
+                        if finding.title.lower().split()[
+                            0
+                        ] in analysis.next_best_question.lower() or any(
+                            k.replace("_", " ") in analysis.next_best_question.lower()
+                            for k in finding.mapped_practice_keys
+                        ):
+                            question = analysis.next_best_question
+                    return {
+                        "question": question[:4000],
+                        "why": (
+                            f"Covering SAFe {practice.name} together with enterprise standard "
+                            f"{finding.title}."
+                        ),
+                        "evidence": self._evidence_blurb(assessment),
+                        "topic": "SAFe + Enterprise",
+                    }
+        return None
 
     def _evidence_blurb(self, assessment: Assessment) -> str:
         snapshot = self.evidence.get_latest_snapshot(assessment.id)

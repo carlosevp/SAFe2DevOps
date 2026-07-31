@@ -11,6 +11,11 @@ from app.models.enums import AssessmentStatus, EvidenceInfluenceMode, Participat
 from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from app.models.enterprise import (
+        AssessmentStandardFinding,
+        AssessmentStandardSnapshot,
+        AssessmentTechnologyContext,
+    )
     from app.models.evidence import EvidenceSnapshot
     from app.models.interview import InterviewTurn
     from app.models.practice import PracticeCoverage
@@ -68,6 +73,15 @@ class Assessment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="assessment", cascade="all, delete-orphan"
     )
     published_reports: Mapped[list[PublishedReport]] = relationship(
+        back_populates="assessment", cascade="all, delete-orphan"
+    )
+    technology_context: Mapped[AssessmentTechnologyContext | None] = relationship(
+        back_populates="assessment", uselist=False, cascade="all, delete-orphan"
+    )
+    standard_snapshots: Mapped[list[AssessmentStandardSnapshot]] = relationship(
+        back_populates="assessment", cascade="all, delete-orphan"
+    )
+    standard_findings: Mapped[list[AssessmentStandardFinding]] = relationship(
         back_populates="assessment", cascade="all, delete-orphan"
     )
 

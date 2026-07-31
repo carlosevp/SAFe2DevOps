@@ -6,13 +6,17 @@ import {
   approveReview,
   editRecommendation,
   getReview,
+  listReviewEnterpriseStandards,
   markEvidenceUnreliable,
   publishAssessment,
   reopenReviewTopic,
   setReviewScore,
   startReview,
+  updateReviewEnterpriseFinding,
   type ReviewPackage,
   type ReviewPractice,
+  type StandardFinding,
+  type StandardFindingStatus,
 } from '../lib/api'
 import type { Screen } from '../types'
 
@@ -22,12 +26,21 @@ interface Props {
   assessmentId?: string | null
 }
 
-const ADMIN_NAV = ['Overview', 'Evidence', 'Interview transcript', 'Practice coverage', 'Candidate scores', 'Improvement plan', 'Publication']
+const ADMIN_NAV = ['Overview', 'Evidence', 'Interview transcript', 'Practice coverage', 'Enterprise Standards', 'Candidate scores', 'Improvement plan', 'Publication']
+
+const FINDING_STATUSES: StandardFindingStatus[] = [
+  'aligned',
+  'partially_aligned',
+  'finding',
+  'insufficient_evidence',
+  'not_applicable',
+]
 
 export default function AdminReview({ dark, onNavigate, assessmentId }: Props) {
   const [navItem, setNavItem] = useState('Practice coverage')
   const [expandedPractice, setExpandedPractice] = useState<string | null>(null)
   const [pkg, setPkg] = useState<ReviewPackage | null>(null)
+  const [enterpriseFindings, setEnterpriseFindings] = useState<StandardFinding[]>([])
   const [editingScore, setEditingScore] = useState<string | null>(null)
   const [draftScore, setDraftScore] = useState(3)
   const [draftRationale, setDraftRationale] = useState('')
@@ -48,7 +61,14 @@ export default function AdminReview({ dark, onNavigate, assessmentId }: Props) {
     setLoading(true)
     getReview(assessmentId)
       .catch(() => startReview(assessmentId))
-      .then(setPkg)
+      .then(async review => {
+        setPkg(review)
+        try {
+          setEnterpriseFindings(await listReviewEnterpriseStandards(assessmentId))
+        } catch {
+          setEnterpriseFindings([])
+        }
+      })
       .catch(err => setError(err instanceof Error ? err.message : 'Unable to load review'))
       .finally(() => setLoading(false))
   }, [assessmentId])
@@ -368,6 +388,97 @@ export default function AdminReview({ dark, onNavigate, assessmentId }: Props) {
                     </div>
                   )
                 })}
+              </div>
+            )}
+
+            {navItem === 'Enterprise Standards' && (
+              <div className="space-y-3 animate-fade-in">
+                <p className="text-sm mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.6 }}>
+                  Review applicable enterprise standards. Findings never block publication and do not change the SAFe maturity score.
+                </p>
+                {enterpriseFindings.length === 0 && (
+                  <div className="rounded-xl p-4 text-sm" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}`, color: 'var(--muted-foreground)' }}>
+                    No applicable enterprise standards were snapshotted for this assessment.
+                  </div>
+                )}
+                {enterpriseFindings.map(finding => (
+                  <div key={finding.id} className="rounded-xl p-4 space-y-3" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{finding.title}</p>
+                        <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                          {finding.category} · {finding.requirement_level} · SAFe: {finding.mapped_practice_keys.join(', ') || '—'}
+                        </p>
+                      </div>
+                      <select
+                        value={finding.status}
+                        onChange={e => {
+                          if (!assessmentId) return
+                          void updateReviewEnterpriseFinding(assessmentId, finding.id, {
+                            status: e.target.value as StandardFindingStatus,
+                          }).then(updated => {
+                            setEnterpriseFindings(prev => prev.map(f => (f.id === updated.id ? updated : f)))
+                          })
+                        }}
+                        className="text-xs rounded-lg px-2 py-1.5 outline-none"
+                        style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}`, color: 'var(--foreground)' }}
+                      >
+                        {FINDING_STATUSES.map(s => <option key={s} value={s}>{s.split('_').join(' ')}</option>)}
+                      </select>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--muted-foreground)' }}>Human evidence</p>
+                        <p style={{ color: 'var(--foreground)', lineHeight: 1.6 }}>{finding.human_evidence_summary || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--muted-foreground)' }}>Jira / ADO evidence</p>
+                        <p style={{ color: 'var(--foreground)', lineHeight: 1.6 }}>{finding.tool_evidence_summary || '—'}</p>
+                      </div>
+                    </div>
+                    <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                      Confidence {finding.confidence != null ? finding.confidence.toFixed(2) : '—'}
+                      {finding.source_interview_turn_ids.length ? ` · Turns ${finding.source_interview_turn_ids.join(', ')}` : ''}
+                      {finding.admin_edited_status ? ' · Admin edited' : ''}
+                    </p>
+                    <textarea
+                      defaultValue={finding.observation}
+                      onBlur={e => {
+                        if (!assessmentId || e.target.value === finding.observation) return
+                        void updateReviewEnterpriseFinding(assessmentId, finding.id, { observation: e.target.value }).then(updated => {
+                          setEnterpriseFindings(prev => prev.map(f => (f.id === updated.id ? updated : f)))
+                        })
+                      }}
+                      placeholder="Observation"
+                      className="w-full rounded-lg p-2.5 text-sm outline-none resize-none"
+                      style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}`, color: 'var(--foreground)', minHeight: 64 }}
+                    />
+                    <textarea
+                      defaultValue={finding.recommendation}
+                      onBlur={e => {
+                        if (!assessmentId || e.target.value === finding.recommendation) return
+                        void updateReviewEnterpriseFinding(assessmentId, finding.id, { recommendation: e.target.value }).then(updated => {
+                          setEnterpriseFindings(prev => prev.map(f => (f.id === updated.id ? updated : f)))
+                        })
+                      }}
+                      placeholder="Proposed recommendation"
+                      className="w-full rounded-lg p-2.5 text-sm outline-none resize-none"
+                      style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}`, color: 'var(--foreground)', minHeight: 64 }}
+                    />
+                    <textarea
+                      defaultValue={finding.admin_note}
+                      onBlur={e => {
+                        if (!assessmentId || e.target.value === finding.admin_note) return
+                        void updateReviewEnterpriseFinding(assessmentId, finding.id, { admin_note: e.target.value }).then(updated => {
+                          setEnterpriseFindings(prev => prev.map(f => (f.id === updated.id ? updated : f)))
+                        })
+                      }}
+                      placeholder="Admin note / context"
+                      className="w-full rounded-lg p-2.5 text-xs outline-none resize-none"
+                      style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}`, color: 'var(--foreground)', minHeight: 48 }}
+                    />
+                  </div>
+                ))}
               </div>
             )}
 

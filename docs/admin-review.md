@@ -12,7 +12,8 @@ Lifecycle: `interview_complete` → `admin_review` → `published`.
 
 - Changing a score requires a **rationale**
 - Improvement actions can be edited before publish
-- Approve marks the package ready; publish creates an immutable versioned report
+- Enterprise Standards findings can be status-adjusted with observation/recommendation/admin notes; they never block publication and do not change SAFe scores
+- Approve marks the package ready; publish creates an immutable versioned report (including a frozen enterprise-standards section)
 
 ## Evidence influence modes
 

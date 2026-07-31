@@ -5,7 +5,8 @@ import re
 import time
 from typing import Any
 
-from app.models.enums import CoverageState
+from app.models.enums import CoverageState, StandardFindingStatus
+from app.schemas.enterprise import StandardUpdateAI
 from app.schemas.interview import InterviewAnalysisAI, OpeningQuestionAI, PracticeUpdateAI
 
 PRACTICE_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -230,11 +231,14 @@ class MockInterviewProvider:
             ". ".join(summary_bits) + "." if summary_bits else "Limited coverage from this answer."
         )
 
+        standard_updates = self._standard_updates(context, lower, matched)
+
         analysis = InterviewAnalysisAI(
             response_summary=self._summary(answer),
             claims=self._claims(answer),
             source_attribution=["room_typed"],
             practice_updates=updates,
+            standard_updates=standard_updates,
             evidence_summary=str(context.get("evidence_summary") or "")[:1000],
             confidence=0.7 if updates else 0.4,
             open_gaps=open_gaps,
@@ -256,6 +260,85 @@ class MockInterviewProvider:
             "fingerprint": hashlib.sha256(answer.encode()).hexdigest()[:12],
         }
         return analysis, telemetry
+
+    def _standard_updates(
+        self, context: dict[str, Any], lower: str, matched: list[str]
+    ) -> list[StandardUpdateAI]:
+        known_standards = set(context.get("known_standard_keys") or [])
+        if not known_standards:
+            return []
+        updates: list[StandardUpdateAI] = []
+        keyword_map = {
+            "approved_secret_management": ("secret", "vault", "credential", "token", "password"),
+            "preferred_java_runtime_openshift": (
+                "openshift",
+                "websphere",
+                "kubernetes",
+                "container",
+            ),
+            "pull_request_quality_gates": (
+                "quality gate",
+                "required check",
+                "pull request",
+                "pr validation",
+            ),
+            "approved_deployment_automation": ("pipeline", "deploy", "release", "cd "),
+            "approved_production_observability": (
+                "monitor",
+                "alert",
+                "dashboard",
+                "observability",
+                "log",
+            ),
+        }
+        for key, words in keyword_map.items():
+            if key not in known_standards:
+                continue
+            hit = any(w in lower for w in words)
+            if not hit and not (
+                matched and key == "approved_deployment_automation" and "deploy" in matched
+            ):
+                if key in known_standards:
+                    updates.append(
+                        StandardUpdateAI(
+                            standard_key=key,
+                            applicability_confirmation=True,
+                            status=StandardFindingStatus.INSUFFICIENT_EVIDENCE,
+                            evidence_summary="Not enough detail yet to confirm enterprise alignment.",
+                            confidence=0.35,
+                            missing_evidence=["Explicit confirmation of the approved practice"],
+                            recommendation_candidate="",
+                        )
+                    )
+                continue
+            status = (
+                StandardFindingStatus.ALIGNED
+                if hit
+                and (
+                    "require" in lower
+                    or "must" in lower
+                    or "approved" in lower
+                    or "secret server" in lower
+                    or "openshift" in lower
+                )
+                else StandardFindingStatus.PARTIALLY_ALIGNED
+                if hit
+                else StandardFindingStatus.FINDING
+            )
+            updates.append(
+                StandardUpdateAI(
+                    standard_key=key,
+                    applicability_confirmation=True,
+                    status=status,
+                    evidence_summary=f"Conversation touched {key.replace('_', ' ')}.",
+                    confidence=0.62 if hit else 0.4,
+                    missing_evidence=[] if hit else ["Concrete tooling confirmation"],
+                    recommendation_candidate="",
+                )
+            )
+        # Keep one update per key
+        by_key = {u.standard_key: u for u in updates}
+        return list(by_key.values())
 
     def _next_question(
         self, coverage_map: dict[str, str], known: set[str], matched: list[str]

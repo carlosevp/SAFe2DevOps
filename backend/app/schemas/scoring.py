@@ -185,7 +185,8 @@ class PublishedResultsOut(StrictSchema):
     improvement_actions: list[ImprovementActionOut]
     chart_summary: str
     scores: dict[str, float]
-    # Never include ai_candidate_score here
+    enterprise_standards: dict | None = None
+    # Never include ai_candidate_score or numeric enterprise alignment score here
 
 
 class AdminPublishedComparisonOut(StrictSchema):

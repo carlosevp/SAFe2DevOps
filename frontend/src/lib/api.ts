@@ -611,6 +611,124 @@ export type ReviewPackage = {
   ai_vs_final: { practice_key: string; ai_candidate_score: number | null; admin_final_score: number | null; admin_rationale?: string | null }[]
 }
 
+export type StandardFindingStatus =
+  | 'aligned'
+  | 'partially_aligned'
+  | 'finding'
+  | 'insufficient_evidence'
+  | 'not_applicable'
+
+export type EnterpriseStandardCondition = {
+  id?: string
+  field: string
+  operator: string
+  value: string
+  logical_group: 'all' | 'any'
+}
+
+export type EnterpriseStandard = {
+  id: string
+  stable_key: string
+  title: string
+  category: string
+  description: string
+  requirement_level: 'required' | 'preferred' | 'recommended'
+  active: boolean
+  applicability_mode: 'always' | 'conditions'
+  mapped_practice_keys: string[]
+  primary_interview_guidance: string
+  follow_up_guidance: string
+  evidence_expectations: string
+  recommendation_when_unmet: string
+  display_order: number
+  conditions: EnterpriseStandardCondition[]
+  referenced: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type EnterpriseStandardInput = Omit<
+  EnterpriseStandard,
+  'id' | 'referenced' | 'created_at' | 'updated_at' | 'conditions'
+> & { conditions: Omit<EnterpriseStandardCondition, 'id'>[] }
+
+export type TechnologyContext = {
+  id?: string
+  assessment_id?: string
+  primary_technology: string
+  application_type: string
+  current_platform: string
+  target_platform: string
+  hosting_location: string
+  customer_exposure: string
+  lifecycle_stage: string
+  application_has_secrets: boolean
+  uses_cicd: boolean
+  context_tags: string[]
+  notes: string
+  confirmed_at?: string | null
+  applicable_standard_count?: number
+  applicable_standard_keys?: string[]
+}
+
+export type StandardFinding = {
+  id: string
+  assessment_id: string
+  snapshot_id: string
+  stable_key: string
+  title: string
+  category: string
+  requirement_level: 'required' | 'preferred' | 'recommended'
+  mapped_practice_keys: string[]
+  status: StandardFindingStatus
+  human_evidence_summary: string
+  tool_evidence_summary: string
+  source_interview_turn_ids: string[]
+  source_evidence_metric_ids: string[]
+  confidence: number | null
+  observation: string
+  recommendation: string
+  admin_edited_status: boolean
+  admin_note: string
+  time_horizon: string
+}
+
+export type PublishedEnterpriseStandards = {
+  applicable_count: number
+  aligned_count: number
+  partially_aligned_count: number
+  finding_count: number
+  insufficient_evidence_count: number
+  not_applicable_count: number
+  findings_by_category: Record<
+    string,
+    {
+      standard: string
+      stable_key: string
+      category: string
+      requirement_level: string
+      status: string
+      observation: string
+      supporting_evidence: string
+      recommendation: string
+      related_safe_practices: string[]
+      suggested_time_horizon: string
+    }[]
+  >
+  recommendation_cards: {
+    standard: string
+    stable_key: string
+    category: string
+    requirement_level: string
+    status: string
+    observation: string
+    supporting_evidence: string
+    recommendation: string
+    related_safe_practices: string[]
+    suggested_time_horizon: string
+  }[]
+}
+
 export type PublishedResults = {
   assessment_id: string
   version: number
@@ -633,6 +751,7 @@ export type PublishedResults = {
   improvement_actions: ImprovementAction[]
   chart_summary: string
   scores: Record<string, number>
+  enterprise_standards?: PublishedEnterpriseStandards | null
 }
 
 export function startReview(assessmentId: string) {
@@ -706,4 +825,87 @@ export function getPublishedResults(assessmentId: string, version?: number) {
 
 export function exportReportUrl(assessmentId: string, version: number, kind: 'pdf' | 'json') {
   return `${API_BASE}/api/assessments/${assessmentId}/results/${version}/export/${kind}`
+}
+
+export function listEnterpriseStandards(params?: { search?: string; category?: string; active?: boolean }) {
+  const qs = new URLSearchParams()
+  if (params?.search) qs.set('search', params.search)
+  if (params?.category) qs.set('category', params.category)
+  if (params?.active != null) qs.set('active', String(params.active))
+  const q = qs.toString()
+  return apiFetch<EnterpriseStandard[]>(`/api/enterprise-standards${q ? `?${q}` : ''}`)
+}
+
+export function createEnterpriseStandard(body: EnterpriseStandardInput) {
+  return apiFetch<EnterpriseStandard>('/api/enterprise-standards', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function updateEnterpriseStandard(id: string, body: Partial<EnterpriseStandardInput>) {
+  return apiFetch<EnterpriseStandard>(`/api/enterprise-standards/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export function duplicateEnterpriseStandard(id: string) {
+  return apiFetch<EnterpriseStandard>(`/api/enterprise-standards/${id}/duplicate`, { method: 'POST' })
+}
+
+export function activateEnterpriseStandard(id: string) {
+  return apiFetch<EnterpriseStandard>(`/api/enterprise-standards/${id}/activate`, { method: 'POST' })
+}
+
+export function deactivateEnterpriseStandard(id: string) {
+  return apiFetch<EnterpriseStandard>(`/api/enterprise-standards/${id}/deactivate`, { method: 'POST' })
+}
+
+export function deleteEnterpriseStandard(id: string) {
+  return apiFetch<void>(`/api/enterprise-standards/${id}`, { method: 'DELETE' })
+}
+
+export function exportEnterpriseStandards() {
+  return apiFetch<{ standards: EnterpriseStandardInput[] }>('/api/enterprise-standards/export')
+}
+
+export function importEnterpriseStandards(standards: EnterpriseStandardInput[]) {
+  return apiFetch<EnterpriseStandard[]>('/api/enterprise-standards/import', {
+    method: 'POST',
+    body: JSON.stringify({ standards }),
+  })
+}
+
+export function upsertTechnologyContext(
+  assessmentId: string,
+  body: Omit<TechnologyContext, 'id' | 'assessment_id' | 'confirmed_at' | 'applicable_standard_count' | 'applicable_standard_keys'>,
+  confirm = false,
+) {
+  const q = confirm ? '?confirm=true' : ''
+  return apiFetch<TechnologyContext>(`/api/assessments/${assessmentId}/technology-context${q}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export function getTechnologyContext(assessmentId: string) {
+  return apiFetch<TechnologyContext | null>(`/api/assessments/${assessmentId}/technology-context`)
+}
+
+export function listReviewEnterpriseStandards(assessmentId: string) {
+  return apiFetch<StandardFinding[]>(`/api/assessments/${assessmentId}/review/enterprise-standards`)
+}
+
+export function updateReviewEnterpriseFinding(
+  assessmentId: string,
+  findingId: string,
+  body: {
+    status?: StandardFindingStatus
+    observation?: string
+    recommendation?: string
+    admin_note?: string
+  },
+) {
+  return apiFetch<StandardFinding>(
+    `/api/assessments/${assessmentId}/review/enterprise-standards/${findingId}`,
+    { method: 'PUT', body: JSON.stringify(body) },
+  )
 }

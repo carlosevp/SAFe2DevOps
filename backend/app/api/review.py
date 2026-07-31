@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, require_admin_or_dev_mock
 from app.schemas.assessment import PublishedReportOut
+from app.schemas.enterprise import StandardFindingOut, StandardFindingUpdateIn
 from app.schemas.scoring import (
     AdminPublishedComparisonOut,
     AdminScoreActionIn,
@@ -18,6 +19,7 @@ from app.schemas.scoring import (
     RecommendationIn,
     ReviewPackageOut,
 )
+from app.services.enterprise_standards import EnterpriseStandardsService
 from app.services.exports import sanitize_download_name
 from app.services.publication import PublicationService
 from app.services.review import ReviewService
@@ -187,6 +189,36 @@ def approve_review(
     db: Session = Depends(get_db_session),
 ) -> ReviewPackageOut:
     out = ReviewService(db).approve(assessment_id, actor=admin.get("subject", "admin"))
+    db.commit()
+    return out
+
+
+@router.get(
+    "/assessments/{assessment_id}/review/enterprise-standards",
+    response_model=list[StandardFindingOut],
+)
+def review_enterprise_standards(
+    assessment_id: str,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> list[StandardFindingOut]:
+    return EnterpriseStandardsService(db).list_findings(assessment_id)
+
+
+@router.put(
+    "/assessments/{assessment_id}/review/enterprise-standards/{finding_id}",
+    response_model=StandardFindingOut,
+)
+def update_enterprise_finding(
+    assessment_id: str,
+    finding_id: str,
+    body: StandardFindingUpdateIn,
+    admin: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> StandardFindingOut:
+    out = EnterpriseStandardsService(db).update_finding(
+        assessment_id, finding_id, body, actor=admin.get("subject", "admin")
+    )
     db.commit()
     return out
 

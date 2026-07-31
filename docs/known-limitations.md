@@ -14,6 +14,7 @@
 - Setup wizard invite copy UI is illustrative; real invites are created in the workshop
 - Admin review Evidence / Transcript nav sections are thin placeholders
 - Some AI settings toggles are local UI-only
+- Enterprise Standards Overlay enriches interview/recommendations but does not change SAFe maturity scores, produce a numeric enterprise-alignment score, or block publication
 
 ## Security / sharing
 

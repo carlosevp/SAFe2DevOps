@@ -78,13 +78,28 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         request_id = getattr(request.state, "request_id", None)
+        # Pydantic may attach exception instances under "ctx"; keep JSON-safe.
+        safe_errors: list[dict[str, Any]] = []
+        for item in exc.errors():
+            cleaned = {
+                key: (
+                    str(value)
+                    if not isinstance(value, (str, int, float, bool, type(None), list, dict))
+                    else value
+                )
+                for key, value in item.items()
+                if key != "ctx"
+            }
+            if "ctx" in item and isinstance(item["ctx"], dict):
+                cleaned["ctx"] = {k: str(v) for k, v in item["ctx"].items()}
+            safe_errors.append(cleaned)
         return JSONResponse(
             status_code=422,
             content=error_body(
                 code="validation_error",
                 message="Request validation failed",
                 request_id=request_id,
-                details={"errors": exc.errors()},
+                details={"errors": safe_errors},
             ),
         )
 

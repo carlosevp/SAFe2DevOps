@@ -19,7 +19,7 @@ const statusLabels: Partial<Record<Screen, string>> = {
 }
 
 export default function Header({ dark, onToggleDark, screen, assessmentName, onNavigate, onSaveExit }: HeaderProps) {
-  const showAssessment = assessmentName && !['welcome', 'integrations', 'ai-settings'].includes(screen)
+  const showAssessment = assessmentName && !['welcome', 'integrations', 'ai-settings', 'enterprise-standards'].includes(screen)
   const statusLabel = statusLabels[screen]
 
   return (

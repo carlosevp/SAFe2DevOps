@@ -9,6 +9,7 @@ export type Screen =
   | 'admin-review'
   | 'results'
   | 'ai-settings'
+  | 'enterprise-standards'
 
 export type CoverageState = 'not-discussed' | 'partial' | 'sufficient' | 'clarify'
 

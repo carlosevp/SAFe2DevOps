@@ -10,6 +10,7 @@ import RemoteContributor from './screens/RemoteContributor'
 import AdminReview from './screens/AdminReview'
 import Results from './screens/Results'
 import AISettings from './screens/AISettings'
+import EnterpriseStandards from './screens/EnterpriseStandards'
 import type { Screen } from './types'
 
 const ASSESSMENT_SCREENS: Screen[] = ['setup', 'evidence', 'workshop', 'checkpoint', 'admin-review', 'results']
@@ -100,6 +101,9 @@ export default function App() {
       )}
       {screen === 'ai-settings' && (
         <AISettings dark={dark} onNavigate={setScreen} />
+      )}
+      {screen === 'enterprise-standards' && (
+        <EnterpriseStandards dark={dark} onNavigate={setScreen} />
       )}
 
       {/* Toast for dark mode indication */}

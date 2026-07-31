@@ -10,6 +10,7 @@ import {
   listJiraBoards,
   listJiraProjects,
   setSourceSelection,
+  upsertTechnologyContext,
   type CatalogPipeline,
   type CatalogProject,
   type CatalogRepo,
@@ -130,6 +131,7 @@ const STEP_TITLES = [
   'Azure DevOps source',
   'Evidence influence',
   'Participation',
+  'Technology & platform',
 ]
 
 const INFLUENCE_API = {
@@ -174,6 +176,18 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
   const [adoRepoId, setAdoRepoId] = useState('')
   const [defaultBranch, setDefaultBranch] = useState('main')
   const [selectedPipelineIds, setSelectedPipelineIds] = useState<string[]>([])
+  const [assessmentIdLocal, setAssessmentIdLocal] = useState<string | null>(null)
+  const [primaryTechnology, setPrimaryTechnology] = useState('Java')
+  const [applicationType, setApplicationType] = useState('API')
+  const [currentPlatform, setCurrentPlatform] = useState('WebSphere')
+  const [targetPlatform, setTargetPlatform] = useState('OpenShift')
+  const [hostingLocation, setHostingLocation] = useState('on_premises')
+  const [customerExposure, setCustomerExposure] = useState('customer_facing')
+  const [lifecycleStage, setLifecycleStage] = useState('modernizing')
+  const [applicationHasSecrets, setApplicationHasSecrets] = useState(true)
+  const [usesCicd, setUsesCicd] = useState(true)
+  const [contextNotes, setContextNotes] = useState('')
+  const [applicableCount, setApplicableCount] = useState<number | null>(null)
 
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
   const cardBg = 'var(--card)'
@@ -253,44 +267,109 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
 
   const scopeStatement = `Assess the ${teamName || 'team'} using the ${jiraProjectKey || 'selected'} Jira project and ${adoRepo?.name || 'selected'} repository as representative evidence from the last ${lookback} days.`
 
+  function suggestFromRepo(repoName: string) {
+    const lower = repoName.toLowerCase()
+    if (lower.includes('java') || lower.includes('claim')) {
+      setPrimaryTechnology('Java')
+      setCurrentPlatform(prev => prev || 'WebSphere')
+      setTargetPlatform(prev => prev || 'OpenShift')
+    } else if (lower.includes('node') || lower.includes('ts') || lower.includes('js')) {
+      setPrimaryTechnology('TypeScript')
+    } else if (lower.includes('py')) {
+      setPrimaryTechnology('Python')
+    }
+    if (adoPipelines.length > 0) setUsesCicd(true)
+  }
+
+  async function ensureAssessmentCreated() {
+    if (assessmentIdLocal) return assessmentIdLocal
+    const assessment = await createAssessment({
+      team_name: teamName,
+      product_service_name: productName,
+      description: description || undefined,
+      value_stream: valueStream || undefined,
+      owner_name: ownerName,
+      owner_email: ownerEmail,
+      lookback_days: Math.min(365, Math.max(30, lookback)),
+      evidence_influence_mode: INFLUENCE_API[influence],
+      participation_mode: PARTICIPATION_API[participation],
+    })
+    await setSourceSelection(assessment.id, {
+      jira_project_key: jiraProjectKey,
+      jira_project_name: jiraProject?.name || null,
+      jira_board_id: jiraBoardId || null,
+      jira_board_name: jiraBoard?.name || null,
+      jira_jql: jiraJql || null,
+      ado_project_id: adoProjectId,
+      ado_project_name: adoProject?.name || null,
+      ado_repository_id: adoRepoId,
+      ado_repository_name: adoRepo?.name || 'repository',
+      default_branch: defaultBranch,
+      selected_pipelines: adoPipelines
+        .filter(p => selectedPipelineIds.includes(p.id))
+        .map(p => ({ id: p.id, name: p.name })),
+    })
+    setAssessmentIdLocal(assessment.id)
+    onAssessmentReady?.(assessment.id, assessment.team_name)
+    if (adoRepo?.name) suggestFromRepo(adoRepo.name)
+    return assessment.id
+  }
+
+  async function persistTechnologyContext(assessmentId: string, confirm: boolean) {
+    const out = await upsertTechnologyContext(
+      assessmentId,
+      {
+        primary_technology: primaryTechnology,
+        application_type: applicationType,
+        current_platform: currentPlatform,
+        target_platform: targetPlatform,
+        hosting_location: hostingLocation,
+        customer_exposure: customerExposure,
+        lifecycle_stage: lifecycleStage,
+        application_has_secrets: applicationHasSecrets,
+        uses_cicd: usesCicd,
+        context_tags: [],
+        notes: contextNotes,
+      },
+      confirm,
+    )
+    setApplicableCount(out.applicable_standard_count ?? 0)
+    return out
+  }
+
   async function finishSetup() {
     setSubmitting(true)
     setError(null)
     try {
-      const assessment = await createAssessment({
-        team_name: teamName,
-        product_service_name: productName,
-        description: description || undefined,
-        value_stream: valueStream || undefined,
-        owner_name: ownerName,
-        owner_email: ownerEmail,
-        lookback_days: Math.min(365, Math.max(30, lookback)),
-        evidence_influence_mode: INFLUENCE_API[influence],
-        participation_mode: PARTICIPATION_API[participation],
-      })
-      await setSourceSelection(assessment.id, {
-        jira_project_key: jiraProjectKey,
-        jira_project_name: jiraProject?.name || null,
-        jira_board_id: jiraBoardId || null,
-        jira_board_name: jiraBoard?.name || null,
-        jira_jql: jiraJql || null,
-        ado_project_id: adoProjectId,
-        ado_project_name: adoProject?.name || null,
-        ado_repository_id: adoRepoId,
-        ado_repository_name: adoRepo?.name || 'repository',
-        default_branch: defaultBranch,
-        selected_pipelines: adoPipelines
-          .filter(p => selectedPipelineIds.includes(p.id))
-          .map(p => ({ id: p.id, name: p.name })),
-      })
-      await collectEvidence(assessment.id)
-      onAssessmentReady?.(assessment.id, assessment.team_name)
+      const assessmentId = await ensureAssessmentCreated()
+      await persistTechnologyContext(assessmentId, true)
+      await collectEvidence(assessmentId)
+      onAssessmentReady?.(assessmentId, teamName)
       onNavigate('evidence')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Setup failed')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  async function handleContinue() {
+    if (step === 4) {
+      setSubmitting(true)
+      setError(null)
+      try {
+        const id = await ensureAssessmentCreated()
+        await persistTechnologyContext(id, false)
+        setStep(5)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to prepare technology context')
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+    if (step < STEP_TITLES.length - 1) setStep(s => s + 1)
+    else void finishSetup()
   }
 
   function togglePipeline(id: string) {
@@ -607,6 +686,158 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
           </div>
         )
 
+      case 5:
+        return (
+          <div className="space-y-5">
+            <div
+              className="rounded-xl p-4 flex items-start gap-3"
+              style={{ background: dark ? '#141f35' : '#f0fdfc', border: `1px solid ${dark ? '#1e3358' : '#ccfbf7'}` }}
+            >
+              <Info size={14} style={{ color: '#0f8b8d', marginTop: 1, flexShrink: 0 }} />
+              <p className="text-sm" style={{ color: dark ? '#5de8e0' : '#0e7170', lineHeight: 1.6 }}>
+                Confirm technology and platform context so applicable enterprise standards can enrich the interview.
+                Suggested values are based on the selected repository — please verify before continuing.
+              </p>
+            </div>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <Label>Primary technology</Label>
+                <SelectField
+                  value={primaryTechnology}
+                  onChange={v => {
+                    setPrimaryTechnology(v)
+                    if (assessmentIdLocal) void persistTechnologyContext(assessmentIdLocal, false)
+                  }}
+                  options={['Java', 'TypeScript', 'Python', '.NET', 'Other'].map(v => ({ value: v, label: v }))}
+                />
+              </div>
+              <div>
+                <Label>Application type</Label>
+                <SelectField value={applicationType} onChange={setApplicationType} options={['API', 'Web', 'Batch', 'Service', 'Other'].map(v => ({ value: v, label: v }))} />
+              </div>
+              <div>
+                <Label>Current platform</Label>
+                <TextField value={currentPlatform} onChange={setCurrentPlatform} placeholder="e.g. WebSphere" />
+              </div>
+              <div>
+                <Label>Target platform</Label>
+                <TextField value={targetPlatform} onChange={setTargetPlatform} placeholder="e.g. OpenShift" />
+              </div>
+              <div>
+                <Label>Cloud / on-premises</Label>
+                <SelectField
+                  value={hostingLocation}
+                  onChange={setHostingLocation}
+                  options={[
+                    { value: 'cloud', label: 'Cloud' },
+                    { value: 'on_premises', label: 'On-premises' },
+                    { value: 'hybrid', label: 'Hybrid' },
+                  ]}
+                />
+              </div>
+              <div>
+                <Label>Customer exposure</Label>
+                <SelectField
+                  value={customerExposure}
+                  onChange={setCustomerExposure}
+                  options={[
+                    { value: 'customer_facing', label: 'Customer-facing' },
+                    { value: 'internal', label: 'Internal' },
+                  ]}
+                />
+              </div>
+              <div>
+                <Label>Lifecycle stage</Label>
+                <SelectField
+                  value={lifecycleStage}
+                  onChange={setLifecycleStage}
+                  options={[
+                    { value: 'legacy', label: 'Legacy' },
+                    { value: 'modernizing', label: 'Modernizing' },
+                    { value: 'current', label: 'Current' },
+                  ]}
+                />
+              </div>
+              <div>
+                <Label>Optional context notes</Label>
+                <TextField value={contextNotes} onChange={setContextNotes} placeholder="Any platform constraints worth noting" />
+              </div>
+            </div>
+            <div className="grid md:grid-cols-2 gap-3">
+              <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--foreground)' }}>
+                <input
+                  type="checkbox"
+                  checked={applicationHasSecrets}
+                  onChange={e => {
+                    setApplicationHasSecrets(e.target.checked)
+                    if (assessmentIdLocal) {
+                      void upsertTechnologyContext(assessmentIdLocal, {
+                        primary_technology: primaryTechnology,
+                        application_type: applicationType,
+                        current_platform: currentPlatform,
+                        target_platform: targetPlatform,
+                        hosting_location: hostingLocation,
+                        customer_exposure: customerExposure,
+                        lifecycle_stage: lifecycleStage,
+                        application_has_secrets: e.target.checked,
+                        uses_cicd: usesCicd,
+                        context_tags: [],
+                        notes: contextNotes,
+                      }).then(out => setApplicableCount(out.applicable_standard_count ?? 0))
+                    }
+                  }}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                Application has secrets
+              </label>
+              <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--foreground)' }}>
+                <input
+                  type="checkbox"
+                  checked={usesCicd}
+                  onChange={e => {
+                    setUsesCicd(e.target.checked)
+                    if (assessmentIdLocal) {
+                      void upsertTechnologyContext(assessmentIdLocal, {
+                        primary_technology: primaryTechnology,
+                        application_type: applicationType,
+                        current_platform: currentPlatform,
+                        target_platform: targetPlatform,
+                        hosting_location: hostingLocation,
+                        customer_exposure: customerExposure,
+                        lifecycle_stage: lifecycleStage,
+                        application_has_secrets: applicationHasSecrets,
+                        uses_cicd: e.target.checked,
+                        context_tags: [],
+                        notes: contextNotes,
+                      }).then(out => setApplicableCount(out.applicable_standard_count ?? 0))
+                    }
+                  }}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                Uses CI/CD
+              </label>
+            </div>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              {applicableCount != null && (
+                <div className="rounded-xl px-4 py-3 text-sm flex-1" style={{ background: dark ? '#0f1d40' : '#eef3fa', border: `1px solid ${dark ? '#1e3358' : '#b0c7e6'}`, color: 'var(--foreground)' }}>
+                  {applicableCount} enterprise standard{applicableCount === 1 ? '' : 's'} will apply based on this context.
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!assessmentIdLocal) return
+                  void persistTechnologyContext(assessmentIdLocal, false)
+                }}
+                className="text-xs px-3 py-2 rounded-lg"
+                style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
+              >
+                Recalculate applicable standards
+              </button>
+            </div>
+          </div>
+        )
+
       default:
         return null
     }
@@ -657,10 +888,7 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
           </button>
           <button
             disabled={submitting}
-            onClick={() => {
-              if (step < STEP_TITLES.length - 1) setStep(s => s + 1)
-              else void finishSetup()
-            }}
+            onClick={() => void handleContinue()}
             className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-base"
             style={{ background: 'var(--primary)', color: '#fff', opacity: submitting ? 0.7 : 1 }}
             onMouseEnter={e => (e.currentTarget.style.opacity = submitting ? '0.7' : '0.88')}

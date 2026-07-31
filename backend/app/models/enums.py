@@ -70,3 +70,52 @@ class AuditActorType(StrEnum):
     SYSTEM = "system"
     PARTICIPANT = "participant"
     REMOTE = "remote"
+
+
+class RequirementLevel(StrEnum):
+    REQUIRED = "required"
+    PREFERRED = "preferred"
+    RECOMMENDED = "recommended"
+
+
+class ApplicabilityMode(StrEnum):
+    ALWAYS = "always"
+    CONDITIONS = "conditions"
+
+
+class ConditionOperator(StrEnum):
+    EQUALS = "equals"
+    NOT_EQUALS = "not_equals"
+    CONTAINS = "contains"
+    IN = "in"
+    IS_TRUE = "is_true"
+    IS_FALSE = "is_false"
+
+
+class ConditionLogicalGroup(StrEnum):
+    ALL = "all"
+    ANY = "any"
+
+
+class StandardFindingStatus(StrEnum):
+    ALIGNED = "aligned"
+    PARTIALLY_ALIGNED = "partially_aligned"
+    FINDING = "finding"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    NOT_APPLICABLE = "not_applicable"
+
+
+APPLICABILITY_FIELDS = frozenset(
+    {
+        "primary_technology",
+        "application_type",
+        "current_platform",
+        "target_platform",
+        "hosting_location",
+        "customer_exposure",
+        "lifecycle_stage",
+        "application_has_secrets",
+        "uses_cicd",
+        "custom_context_tag",
+    }
+)

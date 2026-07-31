@@ -204,6 +204,53 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
           </div>
         </section>
 
+        {results.enterprise_standards && (
+          <section className="mb-8">
+            <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>Enterprise Standards</h2>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+              {[
+                { label: 'Applicable', value: results.enterprise_standards.applicable_count },
+                { label: 'Aligned', value: results.enterprise_standards.aligned_count },
+                { label: 'Partial', value: results.enterprise_standards.partially_aligned_count },
+                { label: 'Findings', value: results.enterprise_standards.finding_count },
+                { label: 'Insufficient evidence', value: results.enterprise_standards.insufficient_evidence_count },
+              ].map(m => (
+                <div key={m.label} className="rounded-xl p-3" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+                  <div className="text-[11px] mb-1" style={{ color: 'var(--muted-foreground)' }}>{m.label}</div>
+                  <div className="text-lg font-semibold font-mono" style={{ color: 'var(--foreground)' }}>{m.value}</div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-3">
+              {Object.entries(results.enterprise_standards.findings_by_category || {}).map(([category, cards]) => (
+                <div key={category}>
+                  <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--muted-foreground)' }}>{category}</p>
+                  <div className="space-y-3">
+                    {cards.filter(c => c.status === 'finding' || c.status === 'partially_aligned' || c.status === 'insufficient_evidence').map(card => (
+                      <div key={card.stable_key} className="rounded-xl p-4" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{card.standard}</p>
+                          <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: dark ? '#0f1d40' : '#eef3fa', color: 'var(--primary)' }}>{card.requirement_level}</span>
+                          <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>{card.status.split('_').join(' ')}</span>
+                        </div>
+                        <p className="text-sm mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>{card.observation || '—'}</p>
+                        <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>Evidence: {card.supporting_evidence || '—'}</p>
+                        <div className="rounded-lg p-3 mb-2" style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}>
+                          <p className="text-xs font-semibold mb-1" style={{ color: 'var(--foreground)' }}>Recommendation</p>
+                          <p className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>{card.recommendation || '—'}</p>
+                        </div>
+                        <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                          Related SAFe: {(card.related_safe_practices || []).join(', ') || '—'} · Horizon: {horizonLabel(card.suggested_time_horizon || 'next_sprint')}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="mb-8">
           <h2 className="font-semibold text-base mb-4" style={{ color: 'var(--foreground)' }}>Improvement plan</h2>
           <div className="space-y-4">

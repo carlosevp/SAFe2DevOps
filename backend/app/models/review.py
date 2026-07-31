@@ -101,5 +101,6 @@ class PublishedReport(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     export_json_relpath: Mapped[str | None] = mapped_column(String(500), nullable=True)
     export_pdf_relpath: Mapped[str | None] = mapped_column(String(500), nullable=True)
     chart_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    enterprise_standards_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
     assessment: Mapped[Assessment] = relationship(back_populates="published_reports")

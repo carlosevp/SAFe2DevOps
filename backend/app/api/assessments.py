@@ -20,7 +20,14 @@ from app.schemas.assessment import (
     PracticeCoverageAdmin,
     PracticeCoverageParticipant,
 )
+from app.schemas.enterprise import (
+    StandardFindingOut,
+    StandardSnapshotOut,
+    TechnologyContextIn,
+    TechnologyContextOut,
+)
 from app.services.assessment import AssessmentService
+from app.services.enterprise_standards import EnterpriseStandardsService
 from app.services.evidence import EvidenceService
 from app.services.lifecycle import LifecycleService
 
@@ -294,6 +301,60 @@ def update_admin_score(
         admin_final_score=coverage.admin_final_score,
         admin_rationale=coverage.admin_rationale,
     )
+
+
+@router.put(
+    "/{assessment_id}/technology-context",
+    response_model=TechnologyContextOut,
+)
+def upsert_technology_context(
+    assessment_id: str,
+    body: TechnologyContextIn,
+    confirm: bool = False,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> TechnologyContextOut:
+    out = EnterpriseStandardsService(db).upsert_technology_context(
+        assessment_id, body, confirm=confirm
+    )
+    db.commit()
+    return out
+
+
+@router.get(
+    "/{assessment_id}/technology-context",
+    response_model=TechnologyContextOut | None,
+)
+def get_technology_context(
+    assessment_id: str,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> TechnologyContextOut | None:
+    return EnterpriseStandardsService(db).get_technology_context(assessment_id)
+
+
+@router.get(
+    "/{assessment_id}/enterprise-standards/snapshots",
+    response_model=list[StandardSnapshotOut],
+)
+def list_standard_snapshots(
+    assessment_id: str,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> list[StandardSnapshotOut]:
+    return EnterpriseStandardsService(db).list_snapshots(assessment_id)
+
+
+@router.get(
+    "/{assessment_id}/enterprise-standards/findings",
+    response_model=list[StandardFindingOut],
+)
+def list_standard_findings(
+    assessment_id: str,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> list[StandardFindingOut]:
+    return EnterpriseStandardsService(db).list_findings(assessment_id)
 
 
 # Publish endpoint lives on the review router so approve → publish stays cohesive.

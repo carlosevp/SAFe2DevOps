@@ -30,7 +30,9 @@ from app.models.enums import (
 )
 from app.models.review import AssessmentReview
 from app.repositories.integration import IntegrationRepository
+from app.schemas.enterprise import TechnologyContextIn
 from app.services.assessment import AssessmentService
+from app.services.enterprise_standards import EnterpriseStandardsService
 from app.services.publication import PublicationService
 from app.services.review import ReviewService
 
@@ -45,9 +47,11 @@ class SeedService:
         self.db = db
         self.assessments = AssessmentService(db)
         self.integrations = IntegrationRepository(db)
+        self.enterprise = EnterpriseStandardsService(db)
         self.model = get_assessment_model_config()
 
     def seed_demo(self, *, publish: bool = False) -> Assessment:
+        self.enterprise.seed_library()
         integration = self.integrations.get_or_create_singleton()
         self._seed_integration(integration)
 
@@ -58,6 +62,10 @@ class SeedService:
                 select(Assessment).where(Assessment.team_name == "Claims Integration")
             )
         if existing is not None:
+            self._ensure_enterprise_overlay(existing)
+            if publish and AssessmentStatus(existing.status) != AssessmentStatus.PUBLISHED:
+                self._seed_review_and_publish(existing)
+            self.db.flush()
             return existing
 
         assessment = self.assessments.create(
@@ -89,10 +97,13 @@ class SeedService:
                 ],
             },
         )
+        self._seed_technology_context(assessment)
         self._seed_evidence(assessment)
+        self.enterprise.snapshot_applicable(assessment.id)
         self._seed_interview(assessment)
         self._seed_remote_contribution(assessment)
         self._seed_coverage_scores(assessment)
+        self._seed_standard_findings(assessment)
         self._seed_improvements(assessment)
         self._seed_admin_adjustment(assessment)
         assessment.status = AssessmentStatus.ADMIN_REVIEW.value
@@ -115,6 +126,124 @@ class SeedService:
         integration.ado_status = ConnectionStatus.CONNECTED.value
         integration.ado_last_validated_at = datetime(2026, 7, 1, tzinfo=UTC)
         self.db.flush()
+
+    def _demo_technology_context_body(self) -> TechnologyContextIn:
+        return TechnologyContextIn(
+            primary_technology="Java",
+            application_type="API",
+            current_platform="WebSphere",
+            target_platform="OpenShift",
+            hosting_location="on_premises",
+            customer_exposure="customer_facing",
+            lifecycle_stage="modernizing",
+            application_has_secrets=True,
+            uses_cicd=True,
+            context_tags=["claims", "java"],
+            notes="Claims API modernizing from WebSphere toward OpenShift.",
+        )
+
+    def _seed_technology_context(self, assessment: Assessment) -> None:
+        self.enterprise.upsert_technology_context(
+            assessment.id,
+            self._demo_technology_context_body(),
+            confirm=True,
+        )
+
+    def _ensure_enterprise_overlay(self, assessment: Assessment) -> None:
+        """Backfill overlay records for an existing demo assessment."""
+        from app.models import AssessmentTechnologyContext
+
+        existing_ctx = self.db.scalar(
+            select(AssessmentTechnologyContext).where(
+                AssessmentTechnologyContext.assessment_id == assessment.id
+            )
+        )
+        if existing_ctx is None:
+            body = self._demo_technology_context_body()
+            row = AssessmentTechnologyContext(
+                assessment_id=assessment.id,
+                primary_technology=body.primary_technology,
+                application_type=body.application_type,
+                current_platform=body.current_platform,
+                target_platform=body.target_platform,
+                hosting_location=body.hosting_location,
+                customer_exposure=body.customer_exposure,
+                lifecycle_stage=body.lifecycle_stage,
+                application_has_secrets=body.application_has_secrets,
+                uses_cicd=body.uses_cicd,
+                context_tags_json=json.dumps(body.context_tags),
+                notes=body.notes,
+                confirmed_at=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+            )
+            self.db.add(row)
+            self.db.flush()
+        self.enterprise.snapshot_applicable(assessment.id)
+        if self.enterprise.list_findings(assessment.id):
+            # Only apply demo statuses when findings still look untouched.
+            untouched = all(
+                f.status.value == "insufficient_evidence" and not f.admin_edited_status
+                for f in self.enterprise.list_findings(assessment.id)
+            )
+            if untouched:
+                self._seed_standard_findings(assessment)
+
+    def _seed_standard_findings(self, assessment: Assessment) -> None:
+        from app.models.enums import StandardFindingStatus
+        from app.schemas.enterprise import StandardFindingUpdateIn
+
+        for finding in self.enterprise.list_findings(assessment.id):
+            if finding.stable_key == "approved_secret_management":
+                self.enterprise.update_finding(
+                    assessment.id,
+                    finding.id,
+                    StandardFindingUpdateIn(
+                        status=StandardFindingStatus.FINDING,
+                        observation="Builds still reference pipeline variables for some API tokens.",
+                        recommendation=(
+                            "Require Secret Server retrieval for runtime and pipeline secrets; "
+                            "remove hardcoded credentials from repositories."
+                        ),
+                        admin_note="Demo admin adjustment for secret management.",
+                    ),
+                    actor="demo-seed",
+                )
+            elif finding.stable_key == "preferred_java_runtime_openshift":
+                self.enterprise.update_finding(
+                    assessment.id,
+                    finding.id,
+                    StandardFindingUpdateIn(
+                        status=StandardFindingStatus.PARTIALLY_ALIGNED,
+                        observation="Target platform is OpenShift; production still on WebSphere.",
+                    ),
+                    actor="demo-seed",
+                )
+            elif finding.stable_key == "pull_request_quality_gates":
+                self.enterprise.update_finding(
+                    assessment.id,
+                    finding.id,
+                    StandardFindingUpdateIn(
+                        status=StandardFindingStatus.PARTIALLY_ALIGNED,
+                        observation="CI runs on PRs but E2E gates are optional.",
+                    ),
+                    actor="demo-seed",
+                )
+            elif finding.stable_key == "approved_deployment_automation":
+                self.enterprise.update_finding(
+                    assessment.id,
+                    finding.id,
+                    StandardFindingUpdateIn(status=StandardFindingStatus.ALIGNED),
+                    actor="demo-seed",
+                )
+            elif finding.stable_key == "approved_production_observability":
+                self.enterprise.update_finding(
+                    assessment.id,
+                    finding.id,
+                    StandardFindingUpdateIn(
+                        status=StandardFindingStatus.FINDING,
+                        observation="Dashboards exist but approved logging platform onboarding is incomplete.",
+                    ),
+                    actor="demo-seed",
+                )
 
     def _seed_evidence(self, assessment: Assessment) -> None:
         snapshot = EvidenceSnapshot(

@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import CoverageState
+from app.schemas.enterprise import StandardUpdateAI
 
 
 class StrictSchema(BaseModel):
@@ -31,6 +32,7 @@ class InterviewAnalysisAI(StrictSchema):
     claims: list[str] = Field(default_factory=list)
     source_attribution: list[str] = Field(default_factory=list)
     practice_updates: list[PracticeUpdateAI] = Field(default_factory=list)
+    standard_updates: list[StandardUpdateAI] = Field(default_factory=list)
     evidence_summary: str = Field(default="", max_length=4000)
     confidence: float = Field(ge=0.0, le=1.0)
     open_gaps: list[str] = Field(default_factory=list)

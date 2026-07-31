@@ -181,6 +181,7 @@ export default function Welcome({ dark, onNavigate }: WelcomeProps) {
           <div className="flex flex-wrap gap-3">
             {[
               { label: 'Integrations', screen: 'integrations' as Screen },
+              { label: 'Enterprise Standards', screen: 'enterprise-standards' as Screen },
               { label: 'AI & Voice settings', screen: 'ai-settings' as Screen },
               { label: 'Admin review', screen: 'admin-review' as Screen },
               { label: 'View published results', screen: 'results' as Screen },

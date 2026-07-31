@@ -1,6 +1,6 @@
 # SAFe2DevOps
 
-Adaptive SAFe DevOps maturity assessment. The Figma Make React frontend is the UX source of truth; FastAPI serves the API and SPA from one origin.
+Adaptive SAFe DevOps maturity assessment with an optional Enterprise Standards Overlay for preferred tools, platforms, and delivery practices. The Figma Make React frontend is the UX source of truth; FastAPI serves the API and SPA from one origin.
 
 ## Repository layout
 

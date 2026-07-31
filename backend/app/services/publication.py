@@ -20,10 +20,27 @@ from app.schemas.scoring import (
     PublishedResultsOut,
 )
 from app.services.audit import AuditService
+from app.services.enterprise_standards import EnterpriseStandardsService
 from app.services.exports import resolve_export_path, write_json_export, write_pdf_export
 from app.services.lifecycle import LifecycleService
 from app.services.scoring import ScoringService
 from app.services.storage import StorageService
+
+
+def _norm_rec(text: str) -> str:
+    cleaned = " ".join((text or "").lower().split())
+    for token in (
+        "the team should ",
+        "the team must ",
+        "please ",
+        "should ",
+        "must ",
+        "recommend ",
+        "ensure ",
+        "the team ",
+    ):
+        cleaned = cleaned.replace(token, "")
+    return cleaned.strip()
 
 
 class PublicationService:
@@ -36,6 +53,7 @@ class PublicationService:
         self.scoring = ScoringService(db)
         self.storage = StorageService()
         self.model = get_assessment_model_config()
+        self.enterprise = EnterpriseStandardsService(db)
 
     def publish(self, assessment_id: str, *, published_by: str = "admin") -> PublishedReport:
         assessment = self._require(assessment_id)
@@ -94,6 +112,7 @@ class PublicationService:
             f"{sum(1 for s in scores.values() if s >= 2.0)} practices assessed."
         )
 
+        enterprise = self.enterprise.published_section(assessment_id)
         improvement_plan = [
             {
                 "id": action.id,
@@ -110,6 +129,30 @@ class PublicationService:
             }
             for action in assessment.improvement_actions
         ]
+        existing_norm = {
+            _norm_rec(item.get("recommended_action") or item.get("title") or "")
+            for item in improvement_plan
+        }
+        for card in enterprise.get("recommendation_cards") or []:
+            rec = card.get("recommendation") or ""
+            if not rec or _norm_rec(rec) in existing_norm:
+                continue
+            improvement_plan.append(
+                {
+                    "id": f"enterprise-{card.get('stable_key')}",
+                    "title": card.get("standard") or "Enterprise standard",
+                    "practice_key": (card.get("related_safe_practices") or [None])[0],
+                    "domain_key": None,
+                    "observation": card.get("observation") or "",
+                    "supporting_evidence": card.get("supporting_evidence") or "",
+                    "why_it_matters": f"Enterprise standard ({card.get('requirement_level')})",
+                    "recommended_action": rec,
+                    "time_horizon": card.get("suggested_time_horizon") or "next_sprint",
+                    "kpi": "",
+                    "priority": 2 if card.get("requirement_level") == "required" else 3,
+                }
+            )
+            existing_norm.add(_norm_rec(rec))
 
         version = self.publications.next_version(assessment_id)
         report = PublishedReport(
@@ -147,6 +190,7 @@ class PublicationService:
             ),
             ai_vs_final_json=json.dumps(ai_vs_final),
             chart_summary=chart_summary,
+            enterprise_standards_json=json.dumps(enterprise),
         )
         self.publications.add(report)
         self.db.flush()
@@ -173,9 +217,13 @@ class PublicationService:
             "chart_summary": chart_summary,
             "prompt_config_version": report.prompt_config_version,
             "model_name": report.model_name,
+            "enterprise_standards": enterprise,
         }
-        # Public export must never include AI candidate comparison.
-        assert "ai_candidate_score" not in json.dumps(public_payload.get("scores"))
+        # Public export must never include AI candidate comparison or numeric enterprise scores.
+        dumped = json.dumps(public_payload)
+        assert "ai_candidate_score" not in dumped
+        assert "enterprise_alignment_score" not in dumped
+        assert "numeric_enterprise" not in dumped
 
         report.export_json_relpath = write_json_export(
             self.storage, assessment_id, version, public_payload
@@ -199,6 +247,19 @@ class PublicationService:
             *[f"- {s}" for s in json.loads(report.limitations_json or "[]")[:8]],
             "",
             chart_summary,
+            "",
+            "Enterprise standards:",
+            (
+                f"- Applicable {enterprise.get('applicable_count', 0)}; "
+                f"aligned {enterprise.get('aligned_count', 0)}; "
+                f"partial {enterprise.get('partially_aligned_count', 0)}; "
+                f"findings {enterprise.get('finding_count', 0)}; "
+                f"insufficient evidence {enterprise.get('insufficient_evidence_count', 0)}"
+            ),
+            *[
+                f"- {card.get('standard')}: {card.get('recommendation')}"
+                for card in (enterprise.get("recommendation_cards") or [])[:8]
+            ],
         ]
         report.export_pdf_relpath = write_pdf_export(
             self.storage, assessment_id, version, pdf_lines
@@ -278,6 +339,8 @@ class PublicationService:
             improvement_actions=improvement,
             chart_summary=report.chart_summary,
             scores=scores,
+            enterprise_standards=json.loads(report.enterprise_standards_json or "{}")
+            or self.enterprise.published_section(assessment_id),
         )
 
     def get_admin_comparison(
