@@ -38,7 +38,9 @@ def test_voice_settings_defaults_and_update(client: TestClient) -> None:
     body = current.json()
     assert body["live_transcription_model"] in body["available_live_transcription_models"]
     assert body["final_transcription_model"] in body["available_final_transcription_models"]
-    assert body["live_delay"] == "low"
+    assert body["live_delay"] in {"high", "medium", "low", "minimal", "xhigh"}
+    # Fresh defaults prefer high for live accuracy.
+    assert body["live_delay"] == "high"
     assert body["expected_languages"] == ["en"] or "en" in body["expected_languages"]
     assert body["final_refinement_enabled"] is True
     assert body["retain_source_audio"] is False
@@ -292,6 +294,7 @@ def test_refine_failure_falls_back_to_live_draft(client: TestClient) -> None:
             patch.object(service.settings, "interview_provider", "live"),
             patch.object(service.settings, "openai_api_key", "sk-test"),
             patch.object(service, "_transcribe_file", side_effect=Exception("boom")),
+            patch.object(service, "_polish_live_transcript", return_value=None),
         ):
             row = service.ai.get()
             row.interview_provider = "live"
@@ -307,6 +310,41 @@ def test_refine_failure_falls_back_to_live_draft(client: TestClient) -> None:
         assert out.transcript == "Keep this live draft"
         assert out.warning
         assert "live transcript" in (out.warning or "").lower()
+    finally:
+        db.close()
+
+
+def test_refine_failure_uses_text_polish_when_audio_fails(client: TestClient) -> None:
+    client.put(
+        "/api/voice/settings",
+        json={"final_refinement_enabled": True, "retain_source_audio": False},
+    )
+    factory = get_session_factory()
+    db = factory()
+    try:
+        service = VoiceService(db)
+        polished = (
+            "We run Continuous Integration with pull request quality gates before merge."
+        )
+        with (
+            patch.object(service.settings, "openai_api_key", "sk-test"),
+            patch.object(service, "_transcribe_file", side_effect=Exception("boom")),
+            patch.object(service, "_polish_live_transcript", return_value=polished),
+        ):
+            out = service.refine_audio(
+                file_bytes=b"abc123",
+                filename="x.webm",
+                content_type="audio/webm",
+                assessment_id=None,
+                live_transcript=(
+                    "We run continuous integration with pull request quality gates before merge."
+                ),
+            )
+        assert out.refined is True
+        assert out.model == "text-polish"
+        assert out.transcript == polished
+        assert out.warning
+        assert "polished" in (out.warning or "").lower()
     finally:
         db.close()
 

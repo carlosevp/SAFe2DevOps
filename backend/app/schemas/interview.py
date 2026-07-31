@@ -138,7 +138,7 @@ class AiSettingsOut(StrictSchema):
     transcription_model: str
     live_transcription_model: str = "gpt-live-transcribe"
     final_transcription_model: str = "gpt-transcribe"
-    live_delay: str = "low"
+    live_delay: str = "high"
     expected_languages: list[str] = Field(default_factory=lambda: ["en"])
     company_vocabulary: list[str] = Field(default_factory=list)
     final_refinement_enabled: bool = True

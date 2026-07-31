@@ -45,7 +45,7 @@ class AiSettingsService:
                 transcription_model=live_model,
                 live_transcription_model=live_model,
                 final_transcription_model="gpt-transcribe",
-                live_delay="low",
+                live_delay="high",
                 expected_languages_json='["en"]',
                 company_vocabulary_json="[]",
                 final_refinement_enabled=True,

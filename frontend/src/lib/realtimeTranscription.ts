@@ -779,7 +779,7 @@ export class RealtimeTranscriptionController {
     const transcription: Record<string, unknown> = {
       model: 'gpt-live-transcribe',
       languages: ctx.languages?.length ? ctx.languages : credentials.languages?.length ? credentials.languages : ['en'],
-      delay: credentials.live_delay || 'low',
+      delay: credentials.live_delay || 'high',
     }
     if (ctx.prompt) transcription.prompt = ctx.prompt.slice(0, 900)
     if (ctx.keywords?.length) transcription.keywords = ctx.keywords.slice(0, 40)

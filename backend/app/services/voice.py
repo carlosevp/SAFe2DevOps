@@ -150,7 +150,7 @@ class VoiceService:
             available_live_transcription_models=AVAILABLE_LIVE_TRANSCRIPTION_MODELS,
             available_final_transcription_models=AVAILABLE_FINAL_TRANSCRIPTION_MODELS,
             available_transcription_models=AVAILABLE_TRANSCRIPTION_MODELS,
-            live_delay=row.live_delay if row.live_delay in LIVE_DELAYS else "low",  # type: ignore[arg-type]
+            live_delay=row.live_delay if row.live_delay in LIVE_DELAYS else "high",  # type: ignore[arg-type]
             expected_languages=self._parse_json_list(row.expected_languages_json) or ["en"],
             company_vocabulary=self._parse_json_list(row.company_vocabulary_json),
             final_refinement_enabled=bool(row.final_refinement_enabled),
@@ -331,7 +331,7 @@ class VoiceService:
             transcription_model=live_model,
             live_transcription_model=live_model,
             final_transcription_model=row.final_transcription_model or DEFAULT_FINAL_MODEL,
-            live_delay=row.live_delay or "low",
+            live_delay=row.live_delay or "high",
             languages=ctx.languages,
             language=ctx.languages[0] if ctx.languages else None,
             stop_mode="manual",  # type: ignore[arg-type]
@@ -386,10 +386,6 @@ class VoiceService:
         started = time.perf_counter()
         safe_name = _sniff_audio_filename(file_bytes, filename or "capture.webm", content_type)
         mime = _normalize_audio_mime(content_type)
-        soft_fallback = (
-            "Using the live transcript. The optional accuracy pass was unavailable — "
-            "edit if needed, then submit."
-        )
         try:
             audio_id, path = self._store_upload_bytes(
                 file_bytes,
@@ -455,20 +451,18 @@ class VoiceService:
                     self.cleanup_temp_audio(audio_id, force=True)
                 except Exception:  # noqa: BLE001
                     pass
-            self.record_metrics(
-                VoiceMetricsIn(refinement_failed=True, final_model=row.final_transcription_model)
-            )
             logger.warning(
                 "voice refine failed code=%s detail=%s",
                 exc.code,
                 redact_secrets((exc.message or "")[:240]),
             )
-            return RefineTranscriptOut(
-                transcript=live_transcript,
-                model=row.final_transcription_model or DEFAULT_FINAL_MODEL,
-                used_live_fallback=True,
-                refined=False,
-                warning=soft_fallback,
+            return self._refine_with_text_polish(
+                live_transcript=live_transcript,
+                prompt=ctx.prompt,
+                keywords=ctx.keywords,
+                final_model=row.final_transcription_model or DEFAULT_FINAL_MODEL,
+                started=started,
+                audio_failure=exc.code,
             )
         except Exception as exc:  # noqa: BLE001
             if audio_id and not retained:
@@ -476,21 +470,130 @@ class VoiceService:
                     self.cleanup_temp_audio(audio_id, force=True)
                 except Exception:  # noqa: BLE001
                     pass
-            self.record_metrics(
-                VoiceMetricsIn(refinement_failed=True, final_model=row.final_transcription_model)
-            )
             logger.warning(
                 "voice refine error type=%s detail=%s",
                 type(exc).__name__,
                 redact_secrets(str(exc)[:240]),
             )
-            return RefineTranscriptOut(
-                transcript=live_transcript,
-                model=row.final_transcription_model or DEFAULT_FINAL_MODEL,
-                used_live_fallback=True,
-                refined=False,
-                warning=soft_fallback,
+            return self._refine_with_text_polish(
+                live_transcript=live_transcript,
+                prompt=ctx.prompt,
+                keywords=ctx.keywords,
+                final_model=row.final_transcription_model or DEFAULT_FINAL_MODEL,
+                started=started,
+                audio_failure=type(exc).__name__,
             )
+
+    def _refine_with_text_polish(
+        self,
+        *,
+        live_transcript: str,
+        prompt: str,
+        keywords: list[str],
+        final_model: str,
+        started: float,
+        audio_failure: str,
+    ) -> RefineTranscriptOut:
+        """When audio re-transcription fails, polish the live draft with domain vocabulary."""
+        polished = self._polish_live_transcript(
+            live_transcript, prompt=prompt, keywords=keywords
+        )
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        if polished and polished.strip() and polished.strip() != (live_transcript or "").strip():
+            self.record_metrics(VoiceMetricsIn(refinement_failed=False, final_model="text-polish"))
+            self.audit.record(
+                assessment_id=None,
+                event_type="voice.final_transcription_text_polish",
+                message="Audio refine failed; polished live transcript with vocabulary hints",
+                actor_type="admin",
+                actor_subject="system",
+                details={
+                    "audio_failure": audio_failure,
+                    "duration_ms": duration_ms,
+                    "keyword_count": len(keywords),
+                },
+            )
+            self.db.flush()
+            return RefineTranscriptOut(
+                transcript=polished.strip(),
+                model="text-polish",
+                used_live_fallback=False,
+                refined=True,
+                duration_ms=duration_ms,
+                warning=(
+                    "Audio accuracy pass was unavailable, so the live draft was polished "
+                    "for likely speech-to-text errors. Please review before submitting."
+                ),
+            )
+
+        self.record_metrics(VoiceMetricsIn(refinement_failed=True, final_model=final_model))
+        return RefineTranscriptOut(
+            transcript=live_transcript,
+            model=final_model,
+            used_live_fallback=True,
+            refined=False,
+            duration_ms=duration_ms,
+            warning=(
+                "Using the live transcript. The optional accuracy pass was unavailable — "
+                "edit if needed, then submit."
+            ),
+        )
+
+    def _polish_live_transcript(
+        self,
+        live_transcript: str,
+        *,
+        prompt: str,
+        keywords: list[str],
+    ) -> str | None:
+        """Correct likely ASR mistakes only; never invent assessment content."""
+        text = (live_transcript or "").strip()
+        if not text or not self.settings.openai_api_key:
+            return None
+        if len(text.split()) < 4:
+            return None
+        try:
+            from openai import OpenAI
+        except ImportError:
+            return None
+
+        vocab = ", ".join(sanitize_keywords(keywords)[:40])
+        instructions = (
+            "You correct speech-to-text errors in a SAFe DevOps workshop answer. "
+            "Fix clear mis-hearings, capitalization, punctuation, and domain terms. "
+            "Use the vocabulary list when a spoken word was likely a listed term. "
+            "Do not add facts, remove substance, or invent details that were not spoken. "
+            "Return only the corrected transcript text with no preface."
+        )
+        user = (
+            f"Context: {(prompt or '')[:700]}\n"
+            f"Vocabulary hints: {vocab or 'SAFe, DevOps, Continuous Exploration, Continuous Integration'}\n\n"
+            f"Transcript to correct:\n{text[:12000]}"
+        )
+        try:
+            client = OpenAI(api_key=self.settings.openai_api_key, timeout=45.0)
+            response = client.responses.create(
+                model="gpt-4o-mini",
+                temperature=0,
+                instructions=instructions,
+                input=user,
+                max_output_tokens=min(4000, max(256, len(text) + 200)),
+            )
+            out = (getattr(response, "output_text", None) or "").strip()
+            if not out:
+                return None
+            # Guard against model refusal / over-editing into empty or tiny output.
+            if len(out.split()) < max(3, int(len(text.split()) * 0.5)):
+                logger.warning("text polish rejected: output too short vs live draft")
+                return None
+            return out
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "text polish failed type=%s detail=%s",
+                type(exc).__name__,
+                redact_secrets(str(exc)[:200]),
+            )
+            return None
 
     def _store_upload_bytes(
         self,
@@ -895,7 +998,7 @@ class VoiceService:
         transcription: dict[str, Any] = {"model": model}
         if model == "gpt-live-transcribe":
             transcription["languages"] = languages or ["en"]
-            transcription["delay"] = row.live_delay if row.live_delay in LIVE_DELAYS else "low"
+            transcription["delay"] = row.live_delay if row.live_delay in LIVE_DELAYS else "high"
         elif languages:
             transcription["language"] = languages[0]
         elif row.voice_language and row.voice_language != "auto":
