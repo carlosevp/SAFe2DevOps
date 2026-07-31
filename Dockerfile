@@ -51,7 +51,8 @@ RUN chmod 755 /app/container_entrypoint.sh \
 
 USER 1001
 EXPOSE 8000
-VOLUME ["/data"]
+# Persist /data via platform volumes (Railway Volumes / OpenShift PVC). Do not use
+# Dockerfile VOLUME — Railway rejects it in favor of Railway Volumes.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT:-8000}/api/health/live" || exit 1
 
