@@ -88,8 +88,8 @@ def test_session_config_live_transcribe_null_turn_detection_and_context(client: 
         assert transcription["model"] == "gpt-live-transcribe"
         assert transcription["languages"] == ["en"]
         assert transcription["delay"] == "low"
-        assert "prompt" in transcription
-        assert "keywords" in transcription
+        assert "prompt" not in transcription
+        assert "keywords" not in transcription
         assert cfg["audio"]["input"]["turn_detection"] is None
     finally:
         db.close()
@@ -110,11 +110,43 @@ def test_session_config_transcribe_uses_language_and_vad(client: TestClient) -> 
     try:
         service = VoiceService(db)
         row = service.ai.get()
-        cfg = service._session_config(row, "prompt", ["SAFe"], ["en"])
+        cfg = service._session_config(row, "prompt text", ["SAFe"], ["en"])
         transcription = cfg["audio"]["input"]["transcription"]
         assert transcription["model"] == "gpt-4o-transcribe"
         assert transcription["language"] == "en"
+        # Legacy Realtime models reject prompt/keywords on session mint.
+        assert "prompt" not in transcription
+        assert "keywords" not in transcription
         assert cfg["audio"]["input"]["turn_detection"]["type"] == "server_vad"
+    finally:
+        db.close()
+
+
+def test_session_config_live_mint_omits_prompt_context_returned_separately(
+    client: TestClient,
+) -> None:
+    client.put(
+        "/api/voice/settings",
+        json={
+            "live_transcription_model": "gpt-live-transcribe",
+            "live_delay": "low",
+            "expected_languages": ["en"],
+        },
+    )
+    factory = get_session_factory()
+    db = factory()
+    try:
+        service = VoiceService(db)
+        row = service.ai.get()
+        cfg = service._session_config(row, "SAFe workshop", ["SAFe", "OpenShift"], ["en"])
+        transcription = cfg["audio"]["input"]["transcription"]
+        assert transcription["model"] == "gpt-live-transcribe"
+        assert "prompt" not in transcription
+        assert "keywords" not in transcription
+        out = service.create_realtime_session(actor="admin")
+        assert "SAFe" in " ".join(out.transcription_context.get("keywords") or []) or out.transcription_context.get(
+            "prompt"
+        )
     finally:
         db.close()
 

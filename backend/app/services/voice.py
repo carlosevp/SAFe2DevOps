@@ -775,10 +775,17 @@ class VoiceService:
     def _session_config(
         self,
         row: AiRuntimeSettings,
-        prompt: str,
-        keywords: list[str],
+        _prompt: str,
+        _keywords: list[str],
         languages: list[str],
     ) -> dict[str, Any]:
+        """Build Realtime transcription session config for credential minting.
+
+        Do not include prompt/keywords here — several models reject them on mint
+        with "The 'prompt' parameter is not supported for this model". Assessment
+        context is returned separately and applied by the browser via session.update
+        after the data channel opens (gpt-live-transcribe only).
+        """
         model = row.live_transcription_model or row.transcription_model or DEFAULT_LIVE_MODEL
         if model not in AVAILABLE_LIVE_TRANSCRIPTION_MODELS:
             model = DEFAULT_LIVE_MODEL
@@ -787,17 +794,10 @@ class VoiceService:
         if model == "gpt-live-transcribe":
             transcription["languages"] = languages or ["en"]
             transcription["delay"] = row.live_delay if row.live_delay in LIVE_DELAYS else "low"
-            if prompt:
-                transcription["prompt"] = prompt[:900]
-            if keywords:
-                transcription["keywords"] = keywords[:40]
-        else:
-            if languages:
-                transcription["language"] = languages[0]
-            elif row.voice_language and row.voice_language != "auto":
-                transcription["language"] = row.voice_language.split("-")[0].lower()
-            if prompt:
-                transcription["prompt"] = prompt[:900]
+        elif languages:
+            transcription["language"] = languages[0]
+        elif row.voice_language and row.voice_language != "auto":
+            transcription["language"] = row.voice_language.split("-")[0].lower()
 
         input_cfg: dict[str, Any] = {
             "transcription": transcription,

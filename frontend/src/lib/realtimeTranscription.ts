@@ -681,6 +681,9 @@ export class RealtimeTranscriptionController {
 
     const dc = pc.createDataChannel('oai-events')
     this.session.dc = dc
+    dc.addEventListener('open', () => {
+      this.applyLiveTranscriptionContext(credentials, dc)
+    })
     dc.addEventListener('message', event => {
       this.handleServerEvent(String(event.data))
     })
@@ -737,6 +740,49 @@ export class RealtimeTranscriptionController {
     }
     this.session.connectedAt = Date.now()
     this.dispatch({ type: 'CONNECTED' })
+    // If the data channel opened before we attached the listener, apply now.
+    if (dc.readyState === 'open') {
+      this.applyLiveTranscriptionContext(credentials, dc)
+    }
+  }
+
+  /**
+   * Apply assessment prompt/keywords after connect. Only gpt-live-transcribe
+   * supports these fields; other models reject prompt on session mint/update.
+   */
+  private applyLiveTranscriptionContext(credentials: RealtimeSessionCredentials, dc: RTCDataChannel) {
+    const model = credentials.live_transcription_model || credentials.transcription_model
+    if (model !== 'gpt-live-transcribe') return
+    if (dc.readyState !== 'open') return
+    const ctx = credentials.transcription_context
+    if (!ctx?.prompt && !ctx?.keywords?.length) return
+
+    const transcription: Record<string, unknown> = {
+      model: 'gpt-live-transcribe',
+      languages: ctx.languages?.length ? ctx.languages : credentials.languages?.length ? credentials.languages : ['en'],
+      delay: credentials.live_delay || 'low',
+    }
+    if (ctx.prompt) transcription.prompt = ctx.prompt.slice(0, 900)
+    if (ctx.keywords?.length) transcription.keywords = ctx.keywords.slice(0, 40)
+
+    try {
+      dc.send(
+        JSON.stringify({
+          type: 'session.update',
+          session: {
+            type: 'transcription',
+            audio: {
+              input: {
+                transcription,
+                turn_detection: null,
+              },
+            },
+          },
+        }),
+      )
+    } catch (err) {
+      reportClientFailure('session_update_context', err)
+    }
   }
 
   private handleServerEvent(raw: string) {
@@ -766,6 +812,10 @@ export class RealtimeTranscriptionController {
       if (type === 'error') {
         const message = event.error?.message || 'Realtime transcription error'
         reportClientFailure('realtime_event', new Error(message))
+        // Context hints are best-effort; keep the live session if prompt/keywords are rejected.
+        if (/prompt.*not supported|keywords.*not supported/i.test(message)) {
+          return
+        }
         // Preserve local draft; do not wipe answer on non-fatal errors during listening.
         this.dispatch({ type: 'ERROR', message })
         if (!liveDraftText(this.store)) {
