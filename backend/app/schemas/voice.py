@@ -77,3 +77,14 @@ class TempAudioCleanupOut(StrictSchema):
     id: str
     cleaned_up: bool
     removed: bool
+
+
+class VoiceClientEventIn(StrictSchema):
+    """Browser-side voice diagnostics (no secrets; logged server-side for Railway)."""
+
+    stage: str = Field(max_length=64)
+    name: str = Field(default="", max_length=120)
+    message: str = Field(default="", max_length=400)
+    secure_context: bool | None = None
+    in_iframe: bool | None = None
+    user_agent: str | None = Field(default=None, max_length=200)

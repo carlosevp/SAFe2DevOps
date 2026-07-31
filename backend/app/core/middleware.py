@@ -46,9 +46,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
-        # Allow same-origin microphone for workshop WebRTC voice capture; keep camera/geo blocked.
+        # Allow microphone for workshop voice capture. Use * so embedded previews /
+        # reverse proxies are less likely to block getUserMedia with cryptic errors.
+        # Camera/geo stay disabled.
         response.headers.setdefault(
-            "Permissions-Policy", "camera=(), microphone=(self), geolocation=()"
+            "Permissions-Policy", "camera=(), microphone=*, geolocation=()"
         )
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")

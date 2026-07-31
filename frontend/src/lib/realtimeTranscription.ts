@@ -1,4 +1,8 @@
-import { createRealtimeSession, exchangeRealtimeCall, type RealtimeSessionCredentials } from './api'
+import {
+  createRealtimeSession,
+  reportVoiceClientEvent,
+  type RealtimeSessionCredentials,
+} from './api'
 import {
   createMicContext,
   displayTranscript,
@@ -31,23 +35,97 @@ const MOCK_SCRIPT =
   'Alex: After merge, CI deploys to staging and we manually promote to production while watching dashboards.'
 
 function mediaErrorMessage(err: unknown): string {
-  if (err instanceof DOMException) {
-    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    return 'Microphone requires HTTPS. Open the Railway URL directly in a browser tab.'
+  }
+  if (err instanceof DOMException || err instanceof Error) {
+    const name = 'name' in err ? String(err.name) : ''
+    const message = err.message || name || 'Microphone error'
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
       return 'Microphone permission denied. Continue with typed response.'
     }
-    if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
       return 'No microphone found. Continue with typed response.'
     }
-    if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
       return 'Microphone is already in use by another application.'
     }
-    if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
-      return 'Microphone constraints are not supported on this device. Try typed response.'
+    if (
+      name === 'OverconstrainedError' ||
+      name === 'ConstraintNotSatisfiedError' ||
+      name === 'InvalidConstraintError' ||
+      /invalid constraint/i.test(message)
+    ) {
+      return (
+        'Browser blocked microphone access (Invalid constraint). ' +
+        'Open the app in a normal browser tab (not an embedded preview) over HTTPS, then allow the mic.'
+      )
     }
-    return err.message || err.name
+    if (name === 'TypeError' && /mediaDevices|getUserMedia|undefined/i.test(message)) {
+      return 'Microphone API unavailable. Use HTTPS in a full browser tab.'
+    }
+    return message
   }
-  if (err instanceof Error) return err.message
   return 'Failed to start voice capture'
+}
+
+/** Request mic access immediately (must stay in the click/user-gesture stack). */
+async function requestMicrophoneStream(): Promise<MediaStream> {
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    throw new Error('Microphone requires HTTPS. Open the Railway URL directly in a browser tab.')
+  }
+  const mediaDevices = navigator.mediaDevices
+  if (!mediaDevices?.getUserMedia) {
+    throw new Error('Microphone API unavailable in this browser. Try Chrome/Edge/Safari over HTTPS.')
+  }
+
+  // Use the most permissive constraint forms. Object constraints are a common
+  // "Invalid constraint" source on some browsers / embedded webviews.
+  try {
+    return await mediaDevices.getUserMedia({ audio: true, video: false })
+  } catch (first) {
+    const msg = first instanceof Error ? first.message : ''
+    if (!/invalid constraint|Overconstrained|ConstraintNotSatisfied/i.test(msg) && !(first instanceof DOMException && /Constraint/i.test(first.name))) {
+      throw first
+    }
+    try {
+      return await mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      return await mediaDevices.getUserMedia({ audio: {} })
+    }
+  }
+}
+
+async function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 2500): Promise<void> {
+  if (pc.iceGatheringState === 'complete') return
+  await new Promise<void>(resolve => {
+    const done = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', done)
+        resolve()
+      }
+    }
+    pc.addEventListener('icegatheringstatechange', done)
+    setTimeout(() => {
+      pc.removeEventListener('icegatheringstatechange', done)
+      resolve()
+    }, timeoutMs)
+  })
+}
+
+function reportClientFailure(stage: string, err: unknown) {
+  const name = err instanceof Error ? err.name : typeof err
+  const message = err instanceof Error ? err.message : String(err)
+  void reportVoiceClientEvent({
+    stage,
+    name,
+    message: message.slice(0, 300),
+    secure_context: typeof window !== 'undefined' ? window.isSecureContext : null,
+    in_iframe: typeof window !== 'undefined' ? window.self !== window.top : null,
+    user_agent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 180) : null,
+  }).catch(() => {
+    // best-effort diagnostics only
+  })
 }
 
 export class RealtimeTranscriptionController {
@@ -89,6 +167,28 @@ export class RealtimeTranscriptionController {
 
   async start() {
     this.dispatch({ type: 'START' })
+
+    // 1) Mic first — must run before any await that leaves the user-gesture stack,
+    // otherwise browsers often skip the permission prompt and fail oddly.
+    let stream: MediaStream
+    try {
+      stream = await requestMicrophoneStream()
+      this.session.stream = stream
+      this.dispatch({ type: 'PERMISSION_GRANTED' })
+    } catch (err) {
+      reportClientFailure('getUserMedia', err)
+      const message = mediaErrorMessage(err)
+      if (/Permission|NotAllowed|Denied/i.test(message)) {
+        this.dispatch({ type: 'PERMISSION_DENIED', message })
+      } else {
+        this.dispatch({ type: 'ERROR', message })
+        this.dispatch({ type: 'FALLBACK_TEXT' })
+      }
+      this.teardownMedia()
+      return
+    }
+
+    // 2) Then mint/session metadata + live/mock connection.
     try {
       const credentials = await createRealtimeSession()
       this.session.credentials = credentials
@@ -98,13 +198,9 @@ export class RealtimeTranscriptionController {
       if (!credentials.voice_enabled) {
         this.dispatch({ type: 'FALLBACK_TEXT' })
         this.dispatch({ type: 'ERROR', message: 'Voice is disabled in admin settings. Use typed response.' })
+        this.teardownMedia()
         return
       }
-
-      // Keep constraints minimal — object constraints are a common "Invalid constraint" source.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      this.session.stream = stream
-      this.dispatch({ type: 'PERMISSION_GRANTED' })
 
       if (credentials.provider === 'mock' || credentials.client_secret.startsWith('ek_mock_')) {
         await this.startMock(stream)
@@ -113,13 +209,10 @@ export class RealtimeTranscriptionController {
       }
       this.beginTimers()
     } catch (err) {
+      reportClientFailure('realtime_session', err)
       const message = mediaErrorMessage(err)
-      if (/Permission|NotAllowed|Denied/i.test(message)) {
-        this.dispatch({ type: 'PERMISSION_DENIED', message })
-      } else {
-        this.dispatch({ type: 'ERROR', message })
-        this.dispatch({ type: 'FALLBACK_TEXT' })
-      }
+      this.dispatch({ type: 'ERROR', message })
+      this.dispatch({ type: 'FALLBACK_TEXT' })
       this.teardownMedia()
     }
   }
@@ -187,18 +280,19 @@ export class RealtimeTranscriptionController {
     }
     try {
       this.teardownMedia(false)
-      const credentials = await createRealtimeSession()
-      this.session.credentials = credentials
-      const stream = this.session.stream || (await navigator.mediaDevices.getUserMedia({ audio: true }))
+      const stream = this.session.stream || (await requestMicrophoneStream())
       this.session.stream = stream
       this.dispatch({ type: 'PERMISSION_GRANTED' })
+      const credentials = await createRealtimeSession()
+      this.session.credentials = credentials
       if (credentials.provider === 'mock' || credentials.client_secret.startsWith('ek_mock_')) {
         await this.startMock(stream)
       } else {
         await this.startLive(credentials, stream)
       }
       this.dispatch({ type: 'RECONNECTED' })
-    } catch {
+    } catch (err) {
+      reportClientFailure('recover', err)
       this.dispatch({ type: 'RECONNECT_FAILED' })
       this.teardownMedia()
     }
@@ -241,14 +335,50 @@ export class RealtimeTranscriptionController {
       }
     })
 
+    // Build a complete WHIP-style offer (wait briefly for ICE), then POST SDP
+    // directly to OpenAI with the ephemeral key — not through our multipart proxy.
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
+    await waitForIceGathering(pc)
+    const sdp = pc.localDescription?.sdp || offer.sdp || ''
+    if (!sdp.includes('v=0') || sdp.trim().length < 32) {
+      throw new Error('Failed to build a WebRTC SDP offer for Realtime transcription')
+    }
 
-    // Server-mediated SDP exchange keeps the OpenAI key off the browser and logs failures.
-    const answerSdp = await exchangeRealtimeCall(offer.sdp || '')
-    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
+    try {
+      const sdpResponse = await fetch(credentials.realtime_calls_url, {
+        method: 'POST',
+        body: sdp,
+        headers: {
+          Authorization: `Bearer ${credentials.client_secret}`,
+          'Content-Type': 'application/sdp',
+        },
+      })
+      const answerBody = await sdpResponse.text()
+      if (!sdpResponse.ok) {
+        let message = answerBody.slice(0, 240) || `Realtime call failed (${sdpResponse.status})`
+        try {
+          const payload = JSON.parse(answerBody) as { error?: { message?: string } }
+          if (payload.error?.message) message = payload.error.message
+        } catch {
+          // plain text / SDP error body
+        }
+        if (sdpResponse.status === 401 || sdpResponse.status === 403) {
+          this.dispatch({ type: 'SESSION_EXPIRED' })
+          void this.recover()
+          return
+        }
+        throw new Error(message)
+      }
+      if (!answerBody.includes('v=0')) {
+        throw new Error('Realtime API returned an invalid SDP answer')
+      }
+      await pc.setRemoteDescription({ type: 'answer', sdp: answerBody })
+    } catch (err) {
+      reportClientFailure('realtime_call', err)
+      throw err
+    }
     this.dispatch({ type: 'CONNECTED' })
-    void credentials
   }
 
   private handleServerEvent(raw: string) {
@@ -269,6 +399,7 @@ export class RealtimeTranscriptionController {
       }
       if (type === 'error') {
         const message = event.error?.message || 'Realtime transcription error'
+        reportClientFailure('realtime_event', new Error(message))
         this.dispatch({ type: 'ERROR', message })
         this.dispatch({ type: 'FALLBACK_TEXT' })
         this.teardownMedia()

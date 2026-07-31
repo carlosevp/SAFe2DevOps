@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from app.core.db import get_session_factory
 from app.models.ai_settings import VoiceTempAudio
-from app.services.voice import SERVER_SDP_MARKER, VoiceService
+from app.services.voice import VoiceService
 
 
 def test_ephemeral_credential_endpoint_and_api_key_nondisclosure(client: TestClient) -> None:
@@ -102,38 +102,23 @@ def test_session_config_transcribe_uses_language_and_vad(client: TestClient) -> 
         db.close()
 
 
-def test_live_session_uses_server_sdp_marker(client: TestClient) -> None:
-    factory = get_session_factory()
-    db = factory()
-    try:
-        service = VoiceService(db)
-        with (
-            patch.object(service.settings, "openai_api_key", "sk-live-parent-key"),
-            patch.object(service.settings, "interview_provider", "live"),
-        ):
-            row = service.ai.get()
-            row.interview_provider = "live"
-            db.flush()
-            out = service.create_realtime_session(actor="admin")
-        assert out.provider == "live"
-        assert out.client_secret == SERVER_SDP_MARKER
-        assert out.realtime_calls_url == "/api/voice/realtime-call"
-        assert "sk-live-parent-key" not in out.client_secret
-    finally:
-        db.close()
-
-
-def test_server_sdp_exchange_posts_to_openai(client: TestClient) -> None:
+def test_live_mint_returns_ephemeral_not_parent_key(client: TestClient) -> None:
+    fake = {
+        "value": "ek_ephemeral_from_openai",
+        "expires_at": int((datetime.now(UTC) + timedelta(seconds=60)).timestamp()),
+    }
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.text = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    mock_response.json.return_value = fake
+    mock_response.text = json.dumps(fake)
 
     factory = get_session_factory()
     db = factory()
     try:
         service = VoiceService(db)
+        parent_key = "sk-live-parent-key-do-not-leak"
         with (
-            patch.object(service.settings, "openai_api_key", "sk-live-parent-key"),
+            patch.object(service.settings, "openai_api_key", parent_key),
             patch.object(service.settings, "interview_provider", "live"),
             patch("httpx.Client") as client_cls,
         ):
@@ -144,38 +129,18 @@ def test_server_sdp_exchange_posts_to_openai(client: TestClient) -> None:
             instance.__enter__.return_value = instance
             instance.post.return_value = mock_response
             client_cls.return_value = instance
-            answer = service.exchange_realtime_sdp(
-                "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n",
-                actor="admin",
-            )
-        assert answer.startswith("v=0")
+            out = service.create_realtime_session(actor="admin")
+        assert out.provider == "live"
+        assert out.client_secret == "ek_ephemeral_from_openai"
+        assert out.realtime_calls_url.endswith("/v1/realtime/calls")
+        assert parent_key not in out.client_secret
         assert instance.post.called
         args, kwargs = instance.post.call_args
-        assert args[0].endswith("/v1/realtime/calls")
-        assert "Authorization" in kwargs["headers"]
-        assert "sk-live-parent-key" in kwargs["headers"]["Authorization"]
+        assert args[0].endswith("/v1/realtime/client_secrets")
+        body = kwargs["json"]
+        assert body["session"]["type"] == "transcription"
     finally:
         db.close()
-
-
-def test_realtime_call_endpoint_returns_sdp(client: TestClient) -> None:
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
-    with patch("app.services.voice.httpx.Client") as client_cls:
-        instance = MagicMock()
-        instance.__enter__.return_value = instance
-        instance.post.return_value = mock_response
-        client_cls.return_value = instance
-        # Force live path via settings on the app-backed service is hard; call service path above.
-        # Endpoint in mock interview mode should reject live SDP exchange.
-        response = client.post(
-            "/api/voice/realtime-call",
-            content="v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n",
-            headers={"Content-Type": "application/sdp"},
-        )
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "voice_mock_mode"
 
 
 def test_temp_audio_cleanup_and_retention_policy(client: TestClient, tmp_data_dir: Path) -> None:
@@ -240,6 +205,22 @@ def test_voice_disabled_blocks_credentials(client: TestClient) -> None:
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "voice_disabled"
     client.put("/api/voice/settings", json={"voice_enabled": True})
+
+
+def test_voice_client_events_accepted(client: TestClient) -> None:
+    response = client.post(
+        "/api/voice/client-events",
+        json={
+            "stage": "getUserMedia",
+            "name": "InvalidConstraintError",
+            "message": "Invalid constraint",
+            "secure_context": True,
+            "in_iframe": False,
+            "user_agent": "pytest",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "logged"
 
 
 def test_ai_settings_includes_voice_fields(client: TestClient) -> None:

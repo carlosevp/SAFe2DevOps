@@ -69,7 +69,7 @@ ALLOW_MOCK_HOST_AUTH=false
 
 Do not set `VITE_API_BASE_URL` for the Railway image; the SPA calls `/api` on the same origin.
 
-Voice transcription uses a **server-mediated** WebRTC SDP exchange (`POST /api/voice/realtime-call`). OpenAI errors are logged as `voice realtime SDP exchange failed …` in Railway logs. In **AI & Voice settings**, set the transcription model to `gpt-4o-transcribe` if an older value is still stored in the database.
+Voice transcription mints an ephemeral OpenAI Realtime key server-side (`POST /v1/realtime/client_secrets`); the browser then POSTs SDP directly to OpenAI. Look for `realtime client_secrets failed …` or `voice client event …` in Railway logs. In **AI & Voice settings**, set the transcription model to `gpt-4o-transcribe` if an older value is still stored.
 
 ## Startup sequence
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import PlainTextResponse
+import logging
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, require_admin_or_dev_mock
@@ -10,11 +11,13 @@ from app.schemas.voice import (
     TempAudioCleanupOut,
     TempAudioOut,
     TempAudioRegisterIn,
+    VoiceClientEventIn,
     VoiceSettingsOut,
     VoiceSettingsUpdate,
 )
 from app.services.voice import VoiceService
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["voice"])
 
 
@@ -49,18 +52,23 @@ def create_realtime_session(
     return out
 
 
-@router.post("/realtime-call")
-async def exchange_realtime_call(
-    request: Request,
+@router.post("/client-events")
+def voice_client_events(
+    body: VoiceClientEventIn,
     admin: dict[str, str] = Depends(require_admin_or_dev_mock),
-    db: Session = Depends(get_db_session),
-) -> PlainTextResponse:
-    """Server-mediated WebRTC SDP exchange with OpenAI (keeps API key server-side)."""
-    offer = (await request.body()).decode("utf-8", errors="replace")
-    service = VoiceService(db)
-    answer = service.exchange_realtime_sdp(offer, actor=admin.get("subject", "admin"))
-    db.commit()
-    return PlainTextResponse(content=answer, media_type="application/sdp")
+) -> dict[str, str]:
+    """Accept browser voice failures so they appear in Railway logs."""
+    logger.warning(
+        "voice client event stage=%s name=%s message=%s secure_context=%s in_iframe=%s actor=%s ua=%s",
+        body.stage,
+        body.name,
+        body.message,
+        body.secure_context,
+        body.in_iframe,
+        admin.get("subject", "admin"),
+        (body.user_agent or "")[:120],
+    )
+    return {"status": "logged"}
 
 
 @router.post("/audio/temp", response_model=TempAudioOut)

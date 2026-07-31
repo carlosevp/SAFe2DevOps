@@ -36,10 +36,9 @@ DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
 # Models that reject server VAD / turn_detection on transcription sessions.
 MODELS_WITHOUT_TURN_DETECTION = frozenset({"gpt-realtime-whisper", "whisper-1"})
 AVAILABLE_LANGUAGES = ["auto", "en", "en-US", "de", "es", "fr"]
+OPENAI_REALTIME_SESSION_URL = "https://api.openai.com/v1/realtime/client_secrets"
 OPENAI_REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls"
 TEMP_AUDIO_TTL_SECONDS = 600
-# Marker for live sessions that use server-side SDP exchange (not a credential).
-SERVER_SDP_MARKER = "proxy"
 
 
 def _openai_error_message(body: str) -> str:
@@ -140,10 +139,11 @@ class VoiceService:
         return self.voice_settings_out(row)
 
     def create_realtime_session(self, *, actor: str = "admin") -> RealtimeSessionOut:
-        """Return voice session metadata for the browser.
+        """Mint ephemeral Realtime credentials for browser WebRTC.
 
-        Live mode uses server-side SDP exchange (`exchange_realtime_sdp`) so the
-        OpenAI API key never reaches the browser and failures are logged in-app.
+        The long-lived OPENAI_API_KEY stays server-side. The browser POSTs its SDP
+        offer directly to OpenAI `/v1/realtime/calls` with the ephemeral key
+        (WHIP-style application/sdp), which avoids empty multipart SDP/EOF errors.
         """
         row = self.ai.get()
         if not row.voice_enabled:
@@ -166,15 +166,12 @@ class VoiceService:
             secret = f"ek_mock_{uuid.uuid4().hex}"
             provider: str = "mock"
         else:
-            # Browser will POST SDP to /api/voice/realtime-call; no ephemeral key needed.
-            expires = datetime.now(UTC) + timedelta(seconds=600)
-            secret = SERVER_SDP_MARKER
-            provider = "live"
+            secret, expires, provider = self._mint_live_secret(session_config)
 
         self.audit.record(
             assessment_id=None,
             event_type="voice.realtime_session_created",
-            message="Realtime transcription session prepared",
+            message="Ephemeral Realtime transcription credentials minted",
             actor_type="admin",
             actor_subject=actor,
             details={
@@ -183,7 +180,7 @@ class VoiceService:
                 .get("input", {})
                 .get("transcription", {})
                 .get("model"),
-                "connection": "server_sdp" if provider == "live" else "mock",
+                "connection": "ephemeral_webrtc",
                 "expires_at": expires.isoformat(),
             },
         )
@@ -192,7 +189,7 @@ class VoiceService:
             client_secret=secret,
             expires_at=expires,
             provider=provider,  # type: ignore[arg-type]
-            realtime_calls_url="/api/voice/realtime-call",
+            realtime_calls_url=OPENAI_REALTIME_CALLS_URL,
             transcription_model=row.transcription_model,
             language=None if row.voice_language == "auto" else row.voice_language,
             stop_mode=row.voice_stop_mode,  # type: ignore[arg-type]
@@ -203,103 +200,75 @@ class VoiceService:
             privacy=privacy,
         )
 
-    def exchange_realtime_sdp(self, sdp_offer: str, *, actor: str = "admin") -> str:
-        """Exchange a browser WebRTC SDP offer for an OpenAI answer (server-side)."""
-        row = self.ai.get()
-        if not row.voice_enabled:
-            raise AppError(
-                code="voice_disabled",
-                message="Voice transcription is disabled by admin",
-                status_code=403,
-            )
-        offer = (sdp_offer or "").strip()
-        if not offer or "v=0" not in offer:
-            raise AppError(
-                code="invalid_sdp_offer",
-                message="A valid WebRTC SDP offer is required",
-                status_code=400,
-            )
-
-        use_mock = (
-            self.settings.interview_provider == "mock"
-            or row.interview_provider == "mock"
-            or not self.settings.openai_api_key
-        )
-        if use_mock:
-            raise AppError(
-                code="voice_mock_mode",
-                message="Live Realtime SDP exchange is unavailable in mock mode",
-                status_code=400,
-            )
-
+    def _mint_live_secret(self, session_config: dict[str, Any]) -> tuple[str, datetime, str]:
         api_key = self.settings.openai_api_key
-        session_config = self._session_config(row)
-        form = {
-            "sdp": offer,
-            "session": json.dumps(session_config, separators=(",", ":")),
+        if not api_key:
+            raise AppError(
+                code="openai_not_configured",
+                message="OPENAI_API_KEY is required for live voice",
+                status_code=503,
+            )
+        payload = {
+            "expires_after": {"anchor": "created_at", "seconds": 60},
+            "session": session_config,
         }
         logger.info(
-            "voice realtime SDP exchange starting model=%s stop_mode=%s actor=%s",
+            "voice realtime client_secrets mint starting model=%s",
             session_config.get("audio", {}).get("input", {}).get("transcription", {}).get("model"),
-            row.voice_stop_mode,
-            actor,
         )
         try:
-            with httpx.Client(timeout=30.0) as client:
+            with httpx.Client(timeout=20.0) as client:
                 response = client.post(
-                    OPENAI_REALTIME_CALLS_URL,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    files={
-                        "sdp": (None, offer),
-                        "session": (None, form["session"]),
+                    OPENAI_REALTIME_SESSION_URL,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
                     },
+                    json=payload,
                 )
+            if response.status_code >= 400:
+                detail = _openai_error_message(response.text)
+                logger.warning(
+                    "realtime client_secrets failed status=%s body=%s",
+                    response.status_code,
+                    redact_secrets(response.text[:500]),
+                )
+                raise AppError(
+                    code="realtime_session_failed",
+                    message=detail or "Failed to create Realtime transcription credentials",
+                    status_code=502,
+                )
+            data = response.json()
+        except AppError:
+            raise
         except Exception as exc:  # noqa: BLE001
-            logger.warning("voice realtime SDP exchange transport error type=%s", type(exc).__name__)
+            logger.warning("realtime client_secrets error type=%s", type(exc).__name__)
             raise AppError(
-                code="realtime_call_failed",
-                message="Failed to connect Realtime transcription session",
+                code="realtime_session_failed",
+                message="Failed to create Realtime transcription credentials",
                 status_code=502,
             ) from exc
 
-        if response.status_code >= 400:
-            detail = _openai_error_message(response.text)
-            logger.warning(
-                "voice realtime SDP exchange failed status=%s body=%s",
-                response.status_code,
-                redact_secrets(response.text[:500]),
-            )
+        secret = data.get("value") or (data.get("client_secret") or {}).get("value")
+        expires_raw = data.get("expires_at") or (data.get("client_secret") or {}).get("expires_at")
+        if not secret:
             raise AppError(
-                code="realtime_call_failed",
-                message=detail or "Failed to connect Realtime transcription session",
+                code="realtime_session_invalid",
+                message="Realtime credentials missing secret",
                 status_code=502,
             )
-
-        answer = response.text.strip()
-        if not answer or "v=0" not in answer:
-            logger.warning("voice realtime SDP exchange returned unexpected answer")
+        if isinstance(expires_raw, (int, float)):
+            expires = datetime.fromtimestamp(expires_raw, tz=UTC)
+        else:
+            expires = datetime.now(UTC) + timedelta(seconds=60)
+        if secret == api_key or secret.startswith(api_key[:12]):
             raise AppError(
-                code="realtime_call_invalid",
-                message="Realtime transcription returned an invalid SDP answer",
-                status_code=502,
+                code="realtime_session_unsafe",
+                message="Refusing to return non-ephemeral credential",
+                status_code=500,
             )
-
-        self.audit.record(
-            event_type="voice.realtime_call_connected",
-            message="Realtime transcription WebRTC call established",
-            actor_type="admin",
-            actor_subject=actor,
-            details={
-                "transcription_model": session_config.get("audio", {})
-                .get("input", {})
-                .get("transcription", {})
-                .get("model"),
-                "answer_bytes": len(answer),
-            },
-        )
-        self.db.flush()
-        logger.info("voice realtime SDP exchange succeeded answer_bytes=%s", len(answer))
-        return answer
+        logger.info("voice realtime client_secrets mint succeeded")
+        return secret, expires, "live"
 
     def register_temp_audio(self, *, assessment_id: str | None, filename: str) -> TempAudioOut:
         row = self.ai.get()
@@ -413,8 +382,8 @@ class VoiceService:
         else:
             mode = "browser_only"
             notice = (
-                "Source audio is not retained. Audio streams to OpenAI Realtime via a server-mediated "
-                "WebRTC session and is discarded after transcription. Corrected transcripts are retained by default."
+                "Source audio is not retained. Audio streams to OpenAI Realtime via ephemeral WebRTC "
+                "credentials and is discarded after transcription. Corrected transcripts are retained by default."
             )
         return VoicePrivacyOut(
             retain_source_audio=bool(row.retain_source_audio),

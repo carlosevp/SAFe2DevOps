@@ -217,7 +217,7 @@ export default function AISettings({ dark, onNavigate }: Props) {
             <Toggle checked={voiceEnabled} onChange={setVoiceEnabled} />
           </SettingRow>
 
-          <SettingRow label="Transcription model" hint="Default is gpt-4o-transcribe. Voice uses a server-mediated WebRTC session so failures appear in Railway logs." dark={dark}>
+          <SettingRow label="Transcription model" hint="Default is gpt-4o-transcribe for OpenAI Realtime WebRTC. Mic/browser failures are logged via /api/voice/client-events." dark={dark}>
             <SelectField
               options={['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'gpt-live-transcribe', 'gpt-realtime-whisper', 'whisper-1']}
               value={transcriptionModel}
