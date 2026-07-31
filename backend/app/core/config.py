@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_assessment_model: str = "gpt-5.6-terra"
-    openai_transcription_model: str = "gpt-realtime-whisper"
+    openai_transcription_model: str = "gpt-live-transcribe"
     openai_reasoning_effort: str = "medium"
 
     # Default DELETE (rollback journal) is portable across unknown/network-backed volumes.

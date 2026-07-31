@@ -230,31 +230,29 @@ export class RealtimeTranscriptionController {
       },
     })
     if (!sdpResponse.ok) {
+      const body = await sdpResponse.text()
       if (sdpResponse.status === 401 || sdpResponse.status === 403) {
         this.dispatch({ type: 'SESSION_EXPIRED' })
         void this.recover()
         return
       }
-      throw new Error(`Realtime call failed (${sdpResponse.status})`)
+      throw new Error(body.slice(0, 200) || `Realtime call failed (${sdpResponse.status})`)
     }
     const answer = { type: 'answer' as const, sdp: await sdpResponse.text() }
     await pc.setRemoteDescription(answer)
     this.dispatch({ type: 'CONNECTED' })
-
-    // Apply session config after connect when channel opens.
-    dc.addEventListener('open', () => {
-      dc.send(
-        JSON.stringify({
-          type: 'session.update',
-          session: credentials.session_config,
-        }),
-      )
-    })
+    // Session config is applied when minting the ephemeral secret. Re-sending
+    // session.update over WebRTC can fail with "Invalid constraint" on some models.
   }
 
   private handleServerEvent(raw: string) {
     try {
-      const event = JSON.parse(raw) as { type?: string; delta?: string; transcript?: string }
+      const event = JSON.parse(raw) as {
+        type?: string
+        delta?: string
+        transcript?: string
+        error?: { message?: string; code?: string }
+      }
       const type = event.type || ''
       if (type.includes('transcription.delta') && typeof event.delta === 'string') {
         const next = `${this.ctx.partialTranscript}${event.delta}`
@@ -264,8 +262,10 @@ export class RealtimeTranscriptionController {
         this.dispatch({ type: 'FINAL_SEGMENT', text: event.transcript })
       }
       if (type === 'error') {
-        this.dispatch({ type: 'DISCONNECT' })
-        void this.recover()
+        const message = event.error?.message || 'Realtime transcription error'
+        this.dispatch({ type: 'ERROR', message })
+        this.dispatch({ type: 'FALLBACK_TEXT' })
+        this.teardownMedia()
       }
     } catch {
       // ignore malformed events

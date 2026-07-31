@@ -30,15 +30,17 @@ class AssessmentCreate(StrictSchema):
 
 
 class AssessmentSourceSelectionIn(StrictSchema):
-    jira_project_key: str
+    """Jira/ADO selections. Empty project/repo fields mean interview-only (skip that system)."""
+
+    jira_project_key: str = ""
     jira_project_name: str | None = None
     jira_board_id: str | None = None
     jira_board_name: str | None = None
     jira_jql: str | None = None
-    ado_project_id: str
+    ado_project_id: str = ""
     ado_project_name: str | None = None
-    ado_repository_id: str
-    ado_repository_name: str
+    ado_repository_id: str = ""
+    ado_repository_name: str = ""
     default_branch: str = "main"
     selected_pipelines: list[dict[str, Any]] = Field(default_factory=list)
 

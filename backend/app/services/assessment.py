@@ -18,6 +18,16 @@ from app.repositories.assessment import AssessmentRepository
 from app.services.audit import AuditService
 from app.services.lifecycle import LifecycleService
 
+_SOURCE_SKIP_TOKENS = frozenset({"", "__none__", "none", "skip", "n/a", "na"})
+
+
+def _normalize_optional_source(value: object) -> str:
+    """Empty / sentinel values mean the tool source is intentionally unused."""
+    text = str(value or "").strip()
+    if text.lower() in _SOURCE_SKIP_TOKENS:
+        return ""
+    return text
+
 
 class AssessmentService:
     LOOKBACK_MIN = 30
@@ -97,17 +107,22 @@ class AssessmentService:
         selection = assessment.source_selection or AssessmentSourceSelection(
             assessment_id=assessment.id
         )
-        selection.jira_project_key = payload["jira_project_key"]
-        selection.jira_project_name = payload.get("jira_project_name")
-        selection.jira_board_id = payload.get("jira_board_id")
-        selection.jira_board_name = payload.get("jira_board_name")
-        selection.jira_jql = payload.get("jira_jql")
-        selection.ado_project_id = payload["ado_project_id"]
-        selection.ado_project_name = payload.get("ado_project_name")
-        selection.ado_repository_id = payload["ado_repository_id"]
-        selection.ado_repository_name = payload["ado_repository_name"]
+        jira_key = _normalize_optional_source(payload.get("jira_project_key"))
+        ado_project = _normalize_optional_source(payload.get("ado_project_id"))
+        ado_repo = _normalize_optional_source(payload.get("ado_repository_id"))
+        ado_repo_name = _normalize_optional_source(payload.get("ado_repository_name"))
+
+        selection.jira_project_key = jira_key
+        selection.jira_project_name = None if not jira_key else payload.get("jira_project_name")
+        selection.jira_board_id = None if not jira_key else payload.get("jira_board_id")
+        selection.jira_board_name = None if not jira_key else payload.get("jira_board_name")
+        selection.jira_jql = None if not jira_key else payload.get("jira_jql")
+        selection.ado_project_id = ado_project
+        selection.ado_project_name = None if not ado_project else payload.get("ado_project_name")
+        selection.ado_repository_id = ado_repo if ado_project else ""
+        selection.ado_repository_name = ado_repo_name if ado_project else ""
         selection.default_branch = payload.get("default_branch") or "main"
-        selection.selected_pipelines_json = json.dumps(pipelines)
+        selection.selected_pipelines_json = json.dumps(pipelines if ado_project else [])
         self.repo.add_source_selection(selection)
         return selection
 

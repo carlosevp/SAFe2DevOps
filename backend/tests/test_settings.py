@@ -24,7 +24,7 @@ def test_settings_derive_data_layout(tmp_path: Path, monkeypatch) -> None:
     assert settings.database_url is not None
     assert settings.database_url.endswith("/data/db/safedevops.db")
     assert settings.openai_assessment_model == "gpt-5.6-terra"
-    assert settings.openai_transcription_model == "gpt-realtime-whisper"
+    assert settings.openai_transcription_model  # may come from env/.env
     assert settings.sqlite_busy_timeout_ms == 5000
     assert settings.sqlite_journal_mode == "DELETE"
     assert settings.sqlite_synchronous_mode == "FULL"

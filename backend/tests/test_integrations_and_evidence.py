@@ -339,3 +339,28 @@ def test_integrations_status_never_echoes_rotated_token(client: TestClient) -> N
     )
     assert keep.status_code == 200
     assert keep.json()["jira_token_configured"] is True
+
+
+def test_interview_only_source_selection_skips_jira_and_ado(client: TestClient) -> None:
+    assessment = _create_assessment(client)
+    skipped = client.post(
+        f"/api/assessments/{assessment['id']}/source-selection",
+        json={
+            "jira_project_key": "",
+            "ado_project_id": "",
+            "ado_repository_id": "",
+            "ado_repository_name": "",
+            "selected_pipelines": [],
+        },
+    )
+    assert skipped.status_code == 200, skipped.text
+
+    collected = client.post(f"/api/assessments/{assessment['id']}/evidence/collect")
+    assert collected.status_code == 200, collected.text
+    body = collected.json()
+    assert body["jira_project_key"] == "(none)"
+    assert body["ado_repository_name"] == "(none)"
+    assert "Interview-led" in body["provenance_summary"]
+    assert body["quality"] == "interview_only"
+    codes = {item["code"] for item in body.get("limitations", [])}
+    assert "source_skipped" in codes

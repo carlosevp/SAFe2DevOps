@@ -23,17 +23,42 @@ from app.services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
+# Prefer gpt-live-transcribe (current OpenAI Realtime transcription default).
 AVAILABLE_TRANSCRIPTION_MODELS = [
-    "gpt-realtime-whisper",
     "gpt-live-transcribe",
     "gpt-4o-transcribe",
+    "gpt-4o-mini-transcribe",
+    "gpt-realtime-whisper",
     "whisper-1",
 ]
+# Models that reject server VAD / turn_detection on transcription sessions.
+MODELS_WITHOUT_TURN_DETECTION = frozenset({"gpt-realtime-whisper", "whisper-1"})
 AVAILABLE_LANGUAGES = ["auto", "en", "en-US", "de", "es", "fr"]
 # Official OpenAI Realtime ephemeral session mint endpoint (not a stored secret value).
 OPENAI_REALTIME_SESSION_URL = "https://api.openai.com/v1/realtime/client_secrets"
 OPENAI_CALLS_URL = "https://api.openai.com/v1/realtime/calls"
 TEMP_AUDIO_TTL_SECONDS = 600
+
+
+def _openai_error_message(body: str) -> str:
+    """Extract a short, non-secret OpenAI error message for client display."""
+    text = (body or "").strip()
+    if not text:
+        return ""
+    try:
+        import json
+
+        payload = json.loads(text)
+        err = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(err, dict):
+            message = str(err.get("message") or "").strip()
+            if message:
+                return message[:240]
+        if isinstance(err, str) and err.strip():
+            return err.strip()[:240]
+    except Exception:  # noqa: BLE001
+        pass
+    return redact_secrets(text[:240])
 
 
 class VoiceService:
@@ -265,6 +290,7 @@ class VoiceService:
                     json=payload,
                 )
             if response.status_code >= 400:
+                detail = _openai_error_message(response.text)
                 logger.warning(
                     "realtime client_secrets failed status=%s body=%s",
                     response.status_code,
@@ -272,7 +298,7 @@ class VoiceService:
                 )
                 raise AppError(
                     code="realtime_session_failed",
-                    message="Failed to create Realtime transcription credentials",
+                    message=detail or "Failed to create Realtime transcription credentials",
                     status_code=502,
                 )
             data = response.json()
@@ -308,19 +334,35 @@ class VoiceService:
         return secret, expires, "live"
 
     def _session_config(self, row: AiRuntimeSettings) -> dict[str, Any]:
-        transcription: dict[str, Any] = {"model": row.transcription_model or "gpt-realtime-whisper"}
+        model = row.transcription_model or "gpt-live-transcribe"
+        transcription: dict[str, Any] = {"model": model}
         if row.voice_language and row.voice_language != "auto":
-            # Prefer ISO-ish short codes for Realtime API.
+            # Prefer ISO-639-1 short codes for Realtime API.
             lang = row.voice_language.split("-")[0].lower()
-            transcription["language"] = lang
+            # gpt-live-transcribe uses languages[]; older models use language.
+            if model == "gpt-live-transcribe":
+                transcription["languages"] = [lang]
+            else:
+                transcription["language"] = lang
+
+        # gpt-realtime-whisper rejects server VAD ("Invalid constraint" / invalid_value).
+        # Manual commit via input_audio_buffer.commit remains supported for those models.
+        allow_vad = (
+            row.voice_stop_mode == "vad" and model not in MODELS_WITHOUT_TURN_DETECTION
+        )
         turn_detection: dict[str, Any] | None
-        if row.voice_stop_mode == "vad":
+        if allow_vad:
             turn_detection = {
                 "type": "server_vad",
-                "silence_duration_ms": int(row.silence_timeout_ms),
+                "threshold": 0.5,
+                "prefix_padding_ms": 300,
+                "silence_duration_ms": max(200, int(row.silence_timeout_ms)),
             }
         else:
             turn_detection = None
+
+        # Do not pin audio/pcm format here: WebRTC negotiates codecs via SDP.
+        # Pinning PCM in a WebRTC transcription session can yield "Invalid constraint".
         return {
             "type": "transcription",
             "audio": {

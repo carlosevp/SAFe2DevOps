@@ -61,12 +61,17 @@ class EvidenceService:
 
         providers = get_integration_providers(self.db, self.settings)
         lookback = assessment.lookback_days
+        jira_skipped = not (selection.jira_project_key or "").strip()
+        ado_skipped = not (selection.ado_project_id or "").strip() or not (
+            selection.ado_repository_id or ""
+        ).strip()
+
         pipeline_names = [
             p.get("name")
             for p in json.loads(selection.selected_pipelines_json or "[]")
             if p.get("name")
         ]
-        if not pipeline_names:
+        if not ado_skipped and not pipeline_names:
             pipeline_names = [
                 p.name
                 for p in providers.ado.list_pipelines(
@@ -78,54 +83,105 @@ class EvidenceService:
         ado_ok = True
         jira_error = None
         ado_error = None
-        try:
-            pages = list(
-                providers.jira.iter_issue_pages(
-                    project_key=selection.jira_project_key,
-                    lookback_days=lookback,
-                    jql=selection.jira_jql,
-                    page_size=50,
+        issues = []
+        commits, prs, runs = [], [], []
+
+        if jira_skipped:
+            jira_error = "Jira project not selected; interview is the source for work-item evidence."
+        else:
+            try:
+                pages = list(
+                    providers.jira.iter_issue_pages(
+                        project_key=selection.jira_project_key,
+                        lookback_days=lookback,
+                        jql=selection.jira_jql,
+                        page_size=50,
+                    )
                 )
-            )
-            issues = [issue for page in pages for issue in page]
-        except Exception as exc:  # noqa: BLE001 - map provider failures
-            jira_ok = False
-            jira_error = str(exc)
-            issues = []
+                issues = [issue for page in pages for issue in page]
+            except Exception as exc:  # noqa: BLE001 - map provider failures
+                jira_ok = False
+                jira_error = str(exc)
+                issues = []
 
-        try:
-            commits = providers.ado.list_commits(
-                project_id=selection.ado_project_id,
-                repository_id=selection.ado_repository_id,
-                lookback_days=lookback,
-                default_branch=selection.default_branch,
+        if ado_skipped:
+            ado_error = (
+                "Azure DevOps repository not selected; interview is the source for "
+                "delivery evidence."
             )
-            prs = providers.ado.list_pull_requests(
-                project_id=selection.ado_project_id,
-                repository_id=selection.ado_repository_id,
-                lookback_days=lookback,
-            )
-            runs = providers.ado.list_pipeline_runs(
-                project_id=selection.ado_project_id,
-                pipeline_names=pipeline_names,
-                lookback_days=lookback,
-            )
-        except Exception as exc:  # noqa: BLE001
-            ado_ok = False
-            ado_error = str(exc)
-            commits, prs, runs = [], [], []
+        else:
+            try:
+                commits = providers.ado.list_commits(
+                    project_id=selection.ado_project_id,
+                    repository_id=selection.ado_repository_id,
+                    lookback_days=lookback,
+                    default_branch=selection.default_branch,
+                )
+                prs = providers.ado.list_pull_requests(
+                    project_id=selection.ado_project_id,
+                    repository_id=selection.ado_repository_id,
+                    lookback_days=lookback,
+                )
+                runs = providers.ado.list_pipeline_runs(
+                    project_id=selection.ado_project_id,
+                    pipeline_names=pipeline_names,
+                    lookback_days=lookback,
+                )
+            except Exception as exc:  # noqa: BLE001
+                ado_ok = False
+                ado_error = str(exc)
+                commits, prs, runs = [], [], []
 
-        jira_norm = normalize_jira_issues(issues, lookback_days=lookback, connection_ok=jira_ok)
-        ado_norm = normalize_ado_evidence(
-            commits=commits, pull_requests=prs, runs=runs, connection_ok=ado_ok
+        jira_norm = normalize_jira_issues(
+            issues, lookback_days=lookback, connection_ok=True if jira_skipped else jira_ok
         )
+        ado_norm = normalize_ado_evidence(
+            commits=commits,
+            pull_requests=prs,
+            runs=runs,
+            connection_ok=True if ado_skipped else ado_ok,
+        )
+        if jira_skipped:
+            jira_norm.limitations = list(jira_norm.limitations) + [
+                {
+                    "code": "source_skipped",
+                    "message": (
+                        "No Jira project selected — rely on interview answers for "
+                        "planning/flow evidence."
+                    ),
+                }
+            ]
+            jira_norm.quality = "interview_only"
+        if ado_skipped:
+            ado_norm.limitations = list(ado_norm.limitations) + [
+                {
+                    "code": "source_skipped",
+                    "message": (
+                        "No Azure DevOps repository selected — rely on interview answers "
+                        "for build/deploy evidence."
+                    ),
+                }
+            ]
+            ado_norm.quality = "interview_only"
+
+        jira_label = selection.jira_project_key or "(none)"
+        ado_label = selection.ado_repository_name or "(none)"
+        if jira_skipped and ado_skipped:
+            provenance = f"Interview-led assessment (no Jira/ADO sources, {lookback}d lookback)"
+        elif jira_skipped:
+            provenance = f"ADO:{ado_label} + interview (no Jira, {lookback}d)"
+        elif ado_skipped:
+            provenance = f"Jira:{jira_label} + interview (no ADO, {lookback}d)"
+        else:
+            provenance = f"Jira:{jira_label} + ADO:{ado_label} ({lookback}d)"
 
         payload = {
             "assessment_id": assessment_id,
             "collected_at": datetime.now(UTC).isoformat(),
             "lookback_days": lookback,
             "jira": {
-                "project_key": selection.jira_project_key,
+                "project_key": selection.jira_project_key or None,
+                "skipped": jira_skipped,
                 "issue_count": len(issues),
                 "normalized": {
                     "completed_items": jira_norm.completed_items,
@@ -177,9 +233,9 @@ class EvidenceService:
             assessment_id=assessment_id,
             lookback_days=lookback,
             collected_at=datetime.now(UTC),
-            jira_project_key=selection.jira_project_key,
-            ado_repository_name=selection.ado_repository_name,
-            provenance_summary=f"Jira:{selection.jira_project_key} + ADO:{selection.ado_repository_name} ({lookback}d)",
+            jira_project_key=selection.jira_project_key or "(none)",
+            ado_repository_name=selection.ado_repository_name or "(none)",
+            provenance_summary=provenance,
             raw_payload_ref=rel_path,
             payload_checksum=checksum,
             quality=quality,
@@ -413,6 +469,12 @@ class EvidenceService:
 
     @staticmethod
     def _combine_quality(jira_q: str, ado_q: str) -> str:
+        if jira_q == "interview_only" and ado_q == "interview_only":
+            return "interview_only"
+        if jira_q == "interview_only":
+            return ado_q or "interview_only"
+        if ado_q == "interview_only":
+            return jira_q or "interview_only"
         priority = [
             "connection_failure",
             "no_activity",

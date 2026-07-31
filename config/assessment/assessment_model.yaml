@@ -57,7 +57,7 @@ evidence_influence_policies:
     allow_evidence_to_lower_score: true
 model_defaults:
   assessment_model: gpt-5.6-terra
-  transcription_model: gpt-realtime-whisper
+  transcription_model: gpt-live-transcribe
   reasoning_effort: medium
   temperature: 0.2
   max_output_tokens: 2048

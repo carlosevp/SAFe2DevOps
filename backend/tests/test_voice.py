@@ -33,7 +33,7 @@ def test_ephemeral_credential_endpoint_and_api_key_nondisclosure(client: TestCli
 def test_voice_settings_defaults_and_update(client: TestClient) -> None:
     current = client.get("/api/voice/settings")
     assert current.status_code == 200
-    assert current.json()["transcription_model"] == "gpt-realtime-whisper"
+    assert current.json()["transcription_model"] in current.json()["available_transcription_models"]
     assert current.json()["retain_source_audio"] is False
     assert current.json()["retain_corrected_transcript"] is True
     assert current.json()["remote_voice_enabled"] is False
@@ -42,7 +42,7 @@ def test_voice_settings_defaults_and_update(client: TestClient) -> None:
         "/api/voice/settings",
         json={
             "voice_enabled": True,
-            "transcription_model": "gpt-realtime-whisper",
+            "transcription_model": "gpt-live-transcribe",
             "voice_language": "en",
             "voice_stop_mode": "vad",
             "silence_timeout_ms": 2000,
@@ -55,6 +55,52 @@ def test_voice_settings_defaults_and_update(client: TestClient) -> None:
     assert updated.status_code == 200, updated.text
     assert updated.json()["voice_stop_mode"] == "vad"
     assert updated.json()["silence_timeout_ms"] == 2000
+
+
+def test_session_config_avoids_vad_for_realtime_whisper(client: TestClient) -> None:
+    client.put(
+        "/api/voice/settings",
+        json={
+            "transcription_model": "gpt-realtime-whisper",
+            "voice_stop_mode": "vad",
+            "voice_language": "en",
+        },
+    )
+    factory = get_session_factory()
+    db = factory()
+    try:
+        service = VoiceService(db)
+        cfg = service._session_config(service.ai.get())
+        assert cfg["type"] == "transcription"
+        assert cfg["audio"]["input"]["transcription"]["model"] == "gpt-realtime-whisper"
+        assert cfg["audio"]["input"]["turn_detection"] is None
+        assert "format" not in cfg["audio"]["input"]
+    finally:
+        db.close()
+
+
+def test_session_config_live_transcribe_uses_languages_and_vad(client: TestClient) -> None:
+    client.put(
+        "/api/voice/settings",
+        json={
+            "transcription_model": "gpt-live-transcribe",
+            "voice_stop_mode": "vad",
+            "voice_language": "en",
+            "silence_timeout_ms": 1500,
+        },
+    )
+    factory = get_session_factory()
+    db = factory()
+    try:
+        service = VoiceService(db)
+        cfg = service._session_config(service.ai.get())
+        transcription = cfg["audio"]["input"]["transcription"]
+        assert transcription["model"] == "gpt-live-transcribe"
+        assert transcription["languages"] == ["en"]
+        assert "language" not in transcription
+        assert cfg["audio"]["input"]["turn_detection"]["type"] == "server_vad"
+    finally:
+        db.close()
 
 
 def test_live_mint_uses_openai_but_returns_only_ephemeral(client: TestClient) -> None:

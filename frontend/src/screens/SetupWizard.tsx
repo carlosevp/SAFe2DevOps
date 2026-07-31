@@ -265,7 +265,15 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
     setTimeout(() => setLinkCopied(false), 2000)
   }
 
-  const scopeStatement = `Assess the ${teamName || 'team'} using the ${jiraProjectKey || 'selected'} Jira project and ${adoRepo?.name || 'selected'} repository as representative evidence from the last ${lookback} days.`
+  const jiraSkipped = !jiraProjectKey
+  const adoSkipped = !adoProjectId
+  const scopeStatement = jiraSkipped && adoSkipped
+    ? `Assess the ${teamName || 'team'} primarily through facilitated interview over the last ${lookback} days (no Jira or Azure DevOps sources selected).`
+    : jiraSkipped
+      ? `Assess the ${teamName || 'team'} using the ${adoRepo?.name || 'selected'} Azure DevOps repository plus interview answers from the last ${lookback} days (no Jira project selected).`
+      : adoSkipped
+        ? `Assess the ${teamName || 'team'} using the ${jiraProjectKey} Jira project plus interview answers from the last ${lookback} days (no Azure DevOps repository selected).`
+        : `Assess the ${teamName || 'team'} using the ${jiraProjectKey} Jira project and ${adoRepo?.name || 'selected'} repository as representative evidence from the last ${lookback} days.`
 
   function suggestFromRepo(repoName: string) {
     const lower = repoName.toLowerCase()
@@ -295,19 +303,21 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
       participation_mode: PARTICIPATION_API[participation],
     })
     await setSourceSelection(assessment.id, {
-      jira_project_key: jiraProjectKey,
-      jira_project_name: jiraProject?.name || null,
-      jira_board_id: jiraBoardId || null,
-      jira_board_name: jiraBoard?.name || null,
-      jira_jql: jiraJql || null,
-      ado_project_id: adoProjectId,
-      ado_project_name: adoProject?.name || null,
-      ado_repository_id: adoRepoId,
-      ado_repository_name: adoRepo?.name || 'repository',
+      jira_project_key: jiraProjectKey || '',
+      jira_project_name: jiraProjectKey ? jiraProject?.name || null : null,
+      jira_board_id: jiraProjectKey ? jiraBoardId || null : null,
+      jira_board_name: jiraProjectKey ? jiraBoard?.name || null : null,
+      jira_jql: jiraProjectKey ? jiraJql || null : null,
+      ado_project_id: adoProjectId || '',
+      ado_project_name: adoProjectId ? adoProject?.name || null : null,
+      ado_repository_id: adoProjectId ? adoRepoId || '' : '',
+      ado_repository_name: adoProjectId ? adoRepo?.name || '' : '',
       default_branch: defaultBranch,
-      selected_pipelines: adoPipelines
-        .filter(p => selectedPipelineIds.includes(p.id))
-        .map(p => ({ id: p.id, name: p.name })),
+      selected_pipelines: adoProjectId
+        ? adoPipelines
+            .filter(p => selectedPipelineIds.includes(p.id))
+            .map(p => ({ id: p.id, name: p.name }))
+        : [],
     })
     setAssessmentIdLocal(assessment.id)
     onAssessmentReady?.(assessment.id, assessment.team_name)
@@ -443,39 +453,52 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
             >
               <Info size={14} style={{ color: '#0f8b8d', marginTop: 1, flexShrink: 0 }} />
               <p className="text-sm" style={{ color: dark ? '#5de8e0' : '#0e7170', lineHeight: 1.6 }}>
-                Choose the most recent or representative project that reflects how this team normally works.
+                Choose a representative Jira project, or skip Jira if the interview should be the source for planning and flow evidence.
               </p>
             </div>
             <div>
               <Label>Jira project</Label>
               <SelectField
                 value={jiraProjectKey}
-                onChange={setJiraProjectKey}
-                options={jiraProjects.map(p => ({ value: p.key || p.id, label: `${p.key} — ${p.name}` }))}
-              />
-            </div>
-            <div>
-              <Label>Board (optional)</Label>
-              <SelectField
-                value={jiraBoardId}
-                onChange={setJiraBoardId}
+                onChange={value => {
+                  setJiraProjectKey(value)
+                  if (!value) {
+                    setJiraBoardId('')
+                    setJiraJql('')
+                  }
+                }}
                 options={[
-                  { value: '', label: '— None —' },
-                  ...jiraBoards.map(b => ({ value: b.id, label: b.name })),
+                  { value: '', label: "Don't use a Jira project — interview only" },
+                  ...jiraProjects.map(p => ({ value: p.key || p.id, label: `${p.key} — ${p.name}` })),
                 ]}
               />
             </div>
-            <div>
-              <Label>JQL refinement (optional)</Label>
-              <TextField
-                placeholder={`project = ${jiraProjectKey || 'CLAIM'} AND type != Epic AND created >= -${lookback}d`}
-                value={jiraJql}
-                onChange={setJiraJql}
-              />
-              <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
-                Advanced filter. Leave blank to use all issues in the selected project within the lookback period.
-              </p>
-            </div>
+            {!jiraSkipped && (
+              <>
+                <div>
+                  <Label>Board (optional)</Label>
+                  <SelectField
+                    value={jiraBoardId}
+                    onChange={setJiraBoardId}
+                    options={[
+                      { value: '', label: '— None —' },
+                      ...jiraBoards.map(b => ({ value: b.id, label: b.name })),
+                    ]}
+                  />
+                </div>
+                <div>
+                  <Label>JQL refinement (optional)</Label>
+                  <TextField
+                    placeholder={`project = ${jiraProjectKey || 'CLAIM'} AND type != Epic AND created >= -${lookback}d`}
+                    value={jiraJql}
+                    onChange={setJiraJql}
+                  />
+                  <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                    Advanced filter. Leave blank to use all issues in the selected project within the lookback period.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         )
 
@@ -488,64 +511,79 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
             >
               <Info size={14} style={{ color: '#0f8b8d', marginTop: 1, flexShrink: 0 }} />
               <p className="text-sm" style={{ color: dark ? '#5de8e0' : '#0e7170', lineHeight: 1.6 }}>
-                Choose one representative repository linked as closely as possible to the selected Jira project.
+                Choose one representative repository, or skip Azure DevOps if the interview should be the source for delivery evidence.
               </p>
             </div>
             <div>
               <Label>Project</Label>
               <SelectField
                 value={adoProjectId}
-                onChange={setAdoProjectId}
-                options={adoProjects.map(p => ({ value: p.id, label: p.name }))}
+                onChange={value => {
+                  setAdoProjectId(value)
+                  if (!value) {
+                    setAdoRepoId('')
+                    setAdoRepos([])
+                    setAdoPipelines([])
+                    setSelectedPipelineIds([])
+                  }
+                }}
+                options={[
+                  { value: '', label: "Don't use Azure DevOps — interview only" },
+                  ...adoProjects.map(p => ({ value: p.id, label: p.name })),
+                ]}
               />
             </div>
-            <div>
-              <Label>Repository</Label>
-              <SelectField
-                value={adoRepoId}
-                onChange={setAdoRepoId}
-                options={adoRepos.map(r => ({ value: r.id, label: r.name }))}
-                disabled={!adoProjectId}
-              />
-            </div>
-            <div>
-              <Label>Default branch</Label>
-              <SelectField
-                value={defaultBranch}
-                onChange={setDefaultBranch}
-                options={(adoBranches.length ? adoBranches : [defaultBranch]).map(b => ({ value: b, label: b }))}
-              />
-            </div>
-            <div>
-              <Label>Pipelines</Label>
-              <div className="space-y-2">
-                {adoPipelines.map(p => (
-                  <div
-                    key={p.id}
-                    className="rounded-lg px-3 py-2.5 flex items-center justify-between"
-                    style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full" style={{ background: '#10b981' }} />
-                      <span className="text-sm font-mono" style={{ color: 'var(--foreground)', fontSize: 12 }}>{p.name}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                      <span>{p.runs ?? '—'} runs</span>
-                      <span style={{ color: '#10b981', fontWeight: 500 }}>{p.success_rate || '—'}</span>
-                      <input
-                        type="checkbox"
-                        checked={selectedPipelineIds.includes(p.id)}
-                        onChange={() => togglePipeline(p.id)}
-                        style={{ accentColor: 'var(--primary)' }}
-                      />
-                    </div>
+            {!adoSkipped && (
+              <>
+                <div>
+                  <Label>Repository</Label>
+                  <SelectField
+                    value={adoRepoId}
+                    onChange={setAdoRepoId}
+                    options={adoRepos.map(r => ({ value: r.id, label: r.name }))}
+                    disabled={!adoProjectId}
+                  />
+                </div>
+                <div>
+                  <Label>Default branch</Label>
+                  <SelectField
+                    value={defaultBranch}
+                    onChange={setDefaultBranch}
+                    options={(adoBranches.length ? adoBranches : [defaultBranch]).map(b => ({ value: b, label: b }))}
+                  />
+                </div>
+                <div>
+                  <Label>Pipelines</Label>
+                  <div className="space-y-2">
+                    {adoPipelines.map(p => (
+                      <div
+                        key={p.id}
+                        className="rounded-lg px-3 py-2.5 flex items-center justify-between"
+                        style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{ background: '#10b981' }} />
+                          <span className="text-sm font-mono" style={{ color: 'var(--foreground)', fontSize: 12 }}>{p.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                          <span>{p.runs ?? '—'} runs</span>
+                          <span style={{ color: '#10b981', fontWeight: 500 }}>{p.success_rate || '—'}</span>
+                          <input
+                            type="checkbox"
+                            checked={selectedPipelineIds.includes(p.id)}
+                            onChange={() => togglePipeline(p.id)}
+                            style={{ accentColor: 'var(--primary)' }}
+                          />
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
-                Auto-discovered pipelines. Uncheck any that are not representative.
-              </p>
-            </div>
+                  <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+                    Auto-discovered pipelines. Uncheck any that are not representative.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         )
 
