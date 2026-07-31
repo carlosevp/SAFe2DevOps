@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.assessment_config import get_assessment_model_config
+from app.assessment_config.schema import DomainConfig, PracticeConfig
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.integrations.http import sanitize_remote_text
@@ -281,6 +282,30 @@ class InterviewService:
                 analysis.clarification_question
             )
             session.last_outcome = "clarify"
+            clarify_key = next(
+                (
+                    u.practice_key
+                    for u in analysis.practice_updates
+                    if u.coverage_state == CoverageState.CLARIFY
+                ),
+                None,
+            )
+            if clarify_key:
+                try:
+                    practice = self.model.require_practice(clarify_key)
+                    domain = next(
+                        d for d, p in self.model.ordered_practices() if p.key == practice.key
+                    )
+                    session.why_asking = self._sanitize_host_narrative(
+                        self._why_with_practice_context(
+                            practice,
+                            domain,
+                            "We need a bit more detail before this area can be marked covered.",
+                        )
+                    )
+                    session.topic_label = f"{domain.short_name} · {practice.name}"
+                except ValueError:
+                    pass
         else:
             session.pending_clarification = None
             session.last_outcome = "sufficient"
@@ -713,6 +738,49 @@ class InterviewService:
             coverage.contradictions_json = json.dumps(contras[-20:])
         self.db.flush()
 
+    def _why_with_practice_context(
+        self,
+        practice: PracticeConfig,
+        domain: DomainConfig,
+        reason: str,
+        *,
+        extra_practices: list[PracticeConfig] | None = None,
+    ) -> str:
+        """Combine plain-language SAFe practice gloss with the facilitation reason."""
+        blocks = [practice.participant_context.strip()]
+        for extra in extra_practices or []:
+            if extra.key == practice.key:
+                continue
+            text = (extra.participant_context or "").strip()
+            if text and text not in blocks:
+                blocks.append(text)
+        reason_text = (reason or "").strip()
+        if reason_text:
+            blocks.append(reason_text)
+        # domain unused for copy today but keeps call sites explicit about focus
+        _ = domain
+        return "\n\n".join(blocks)
+
+    def _practice_question_payload(
+        self,
+        assessment: Assessment,
+        practice: PracticeConfig,
+        domain: DomainConfig,
+        *,
+        question: str,
+        reason: str,
+        evidence: str | None = None,
+        extra_practices: list[PracticeConfig] | None = None,
+    ) -> dict[str, str]:
+        return {
+            "question": question,
+            "why": self._why_with_practice_context(
+                practice, domain, reason, extra_practices=extra_practices
+            ),
+            "evidence": evidence if evidence is not None else self._evidence_blurb(assessment),
+            "topic": f"{domain.short_name} · {practice.name}",
+        }
+
     def _select_next_question(
         self, assessment: Assessment, analysis: InterviewAnalysisAI
     ) -> dict[str, str]:
@@ -732,12 +800,13 @@ class InterviewService:
                     if practice.clarification_seeds
                     else analysis.next_best_question
                 )
-                return {
-                    "question": seed,
-                    "why": f"We need clarity on {practice.name} before coverage can advance.",
-                    "evidence": self._evidence_blurb(assessment),
-                    "topic": domain.short_name,
-                }
+                return self._practice_question_payload(
+                    assessment,
+                    practice,
+                    domain,
+                    question=seed,
+                    reason="We need clarity on this area before coverage can advance.",
+                )
         # Priority 2: multi-coverage SAFe + enterprise (prefer simultaneous gathering)
         multi_q = self._select_multi_coverage_question(assessment, analysis)
         if multi_q is not None:
@@ -748,12 +817,14 @@ class InterviewService:
             if contras:
                 practice = self.model.require_practice(cov.practice_key)
                 domain = next(d for d, p in self.model.ordered_practices() if p.key == practice.key)
-                return {
-                    "question": practice.clarification_seeds[0].text,
-                    "why": "There is a tension between what the team said and observed tool evidence.",
-                    "evidence": contras[0],
-                    "topic": domain.short_name,
-                }
+                return self._practice_question_payload(
+                    assessment,
+                    practice,
+                    domain,
+                    question=practice.clarification_seeds[0].text,
+                    reason="There is a tension between what the team said and observed tool evidence.",
+                    evidence=contras[0],
+                )
         # Priority 4: low confidence / partial (single-practice fallback)
         low = sorted(
             [
@@ -766,12 +837,13 @@ class InterviewService:
         if low:
             practice = self.model.require_practice(low[0].practice_key)
             domain = next(d for d, p in self.model.ordered_practices() if p.key == practice.key)
-            return {
-                "question": practice.question_seeds[0].text,
-                "why": "This practice was only partially covered and still has open gaps.",
-                "evidence": self._evidence_blurb(assessment),
-                "topic": domain.short_name,
-            }
+            return self._practice_question_payload(
+                assessment,
+                practice,
+                domain,
+                question=practice.question_seeds[0].text,
+                reason="This area was only partially covered and still has open gaps.",
+            )
         # Priority 5: uncovered + domain balance
         touched_domains = {
             c.domain_key
@@ -783,22 +855,24 @@ class InterviewService:
             if domain.key not in touched_domains:
                 cov = coverages.get(practice.key)
                 if cov and cov.coverage_state == CoverageState.NOT_DISCUSSED.value:
-                    return {
-                        "question": practice.question_seeds[0].text,
-                        "why": "Balancing coverage across SAFe DevOps domains.",
-                        "evidence": self._evidence_blurb(assessment),
-                        "topic": domain.short_name,
-                    }
+                    return self._practice_question_payload(
+                        assessment,
+                        practice,
+                        domain,
+                        question=practice.question_seeds[0].text,
+                        reason="Balancing coverage across SAFe DevOps domains.",
+                    )
         for domain, practice in ordered:
             cov = coverages.get(practice.key)
             if cov and cov.coverage_state == CoverageState.NOT_DISCUSSED.value:
-                return {
-                    "question": practice.question_seeds[0].text,
-                    "why": analysis.reason_for_next_question
+                return self._practice_question_payload(
+                    assessment,
+                    practice,
+                    domain,
+                    question=practice.question_seeds[0].text,
+                    reason=analysis.reason_for_next_question
                     or "Continuing with uncovered delivery practices.",
-                    "evidence": self._evidence_blurb(assessment),
-                    "topic": domain.short_name,
-                }
+                )
         return {
             "question": analysis.next_best_question,
             "why": analysis.reason_for_next_question,
@@ -971,17 +1045,24 @@ class InterviewService:
                 )
             question = f"{self._evidence_blurb(assessment)}. {seed}{extras}".strip()
 
-        why = (
+        why_reason = (
             "This helps us understand several delivery practices in one discussion"
             + (f", including useful context about your {' and '.join(themes)}" if themes else "")
             + "."
         )
-        return {
-            "question": question[:4000],
-            "why": why,
-            "evidence": self._evidence_blurb(assessment),
-            "topic": domain.short_name,
-        }
+        extras = [
+            self.model.require_practice(pk)
+            for pk in best["practices"][:3]
+            if pk != anchor.key
+        ]
+        return self._practice_question_payload(
+            assessment,
+            anchor,
+            domain,
+            question=question[:4000],
+            reason=why_reason,
+            extra_practices=extras,
+        )
 
     def _answered_turn_count(self, assessment_id: str) -> int:
         return int(

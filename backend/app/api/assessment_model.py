@@ -25,6 +25,7 @@ def get_model() -> AssessmentModelPublic:
                         "name": practice.name,
                         "order": practice.order,
                         "summary": practice.summary,
+                        "participant_context": practice.participant_context,
                     }
                     for practice in sorted(domain.practices, key=lambda item: item.order)
                 ],

@@ -21,6 +21,10 @@ def test_yaml_validation_loads_sixteen_practices() -> None:
     keys = [practice.key for _, practice in model.ordered_practices()]
     assert keys[0] == "hypothesize"
     assert "learn" in keys
+    synthesize = model.require_practice("synthesize")
+    assert "near-term plan" in synthesize.participant_context.lower()
+    assert "near-term plan" in synthesize.question_seeds[0].text.lower()
+    assert all(practice.participant_context for _, practice in model.ordered_practices())
 
 
 def test_unknown_practice_rejection() -> None:

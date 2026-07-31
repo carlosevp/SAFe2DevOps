@@ -81,6 +81,28 @@ def test_opening_question_uses_context(client: TestClient) -> None:
     assert "admin_final_score" not in dumped
 
 
+def test_practice_question_includes_participant_context() -> None:
+    from app.assessment_config import get_assessment_model_config
+
+    svc = object.__new__(InterviewService)
+    svc.model = get_assessment_model_config()
+    practice = svc.model.require_practice("synthesize")
+    domain = next(d for d, p in svc.model.ordered_practices() if p.key == practice.key)
+    assessment = type("A", (), {"id": "x"})()
+    with patch.object(svc, "_evidence_blurb", return_value="Evidence blurb"):
+        payload = svc._practice_question_payload(
+            assessment,  # type: ignore[arg-type]
+            practice,
+            domain,
+            question=practice.question_seeds[0].text,
+            reason="This area was only partially covered and still has open gaps.",
+        )
+    assert "near-term plan" in payload["why"].lower()
+    assert "partially covered" in payload["why"].lower()
+    assert payload["topic"] == "CE · Synthesize"
+    assert "near-term plan" in payload["question"].lower()
+
+
 def test_structured_output_parsing_and_unknown_practice_rejection() -> None:
     from app.assessment_config import get_assessment_model_config
     from app.openai.mock import PRACTICE_KEYWORDS

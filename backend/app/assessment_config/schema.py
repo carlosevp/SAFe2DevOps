@@ -59,6 +59,11 @@ class PracticeConfig(StrictModel):
     order: int = Field(ge=0)
     hidden_from_participants: bool = True
     summary: str = Field(min_length=1, max_length=1000)
+    participant_context: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Plain-language explanation shown to hosts when this practice is in focus.",
+    )
     required_evaluation_dimensions: list[str] = Field(min_length=1)
     maturity_rubric: list[RubricLevel] = Field(min_length=5, max_length=5)
     possible_evidence_signals: list[str] = Field(min_length=1)

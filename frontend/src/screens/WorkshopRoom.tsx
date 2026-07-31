@@ -74,7 +74,6 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
   const [clarificationText, setClarificationText] = useState('')
   const [outcome, setOutcome] = useState<UiOutcome>('none')
   const [lastResult, setLastResult] = useState<TurnSubmitResult | null>(null)
-  const [showWhy, setShowWhy] = useState(false)
   const [showInbox, setShowInbox] = useState(false)
   const [inboxItems, setInboxItems] = useState<RemoteContribution[]>([])
   const [pendingCount, setPendingCount] = useState(0)
@@ -584,15 +583,35 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
             <p className="font-serif text-lg mb-4 leading-relaxed" style={{ color: 'var(--foreground)', lineHeight: 1.6 }}>
               {session?.current_question || 'Loading question…'}
             </p>
-            <button onClick={() => setShowWhy(w => !w)} className="flex items-center gap-1.5 text-xs transition-base" style={{ color: 'var(--muted-foreground)' }}>
-              {showWhy ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-              Why we're asking
-            </button>
-            {showWhy && (
-              <div className="mt-3 p-3 rounded-lg animate-fade-in text-sm" style={{ background: dark ? '#141f35' : '#f8fafc', color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
-                {session?.why_asking}
-              </div>
-            )}
+            {(() => {
+              const parts = (session?.why_asking || '')
+                .split(/\n\n+/)
+                .map(part => part.trim())
+                .filter(Boolean)
+              const practiceMeanings = parts.length > 1 ? parts.slice(0, -1) : []
+              const whyReason = parts.length > 1 ? parts[parts.length - 1] : parts[0] || ''
+              if (!practiceMeanings.length && !whyReason) return null
+              return (
+                <div className="space-y-3">
+                  {practiceMeanings.map(meaning => (
+                    <div
+                      key={meaning.slice(0, 48)}
+                      className="p-3 rounded-lg text-sm"
+                      style={{ background: dark ? '#141f35' : '#f8fafc', border: `1px solid ${cardBorder}`, color: 'var(--foreground)', lineHeight: 1.65 }}
+                    >
+                      <p className="text-xs font-semibold mb-1" style={{ color: 'var(--primary)' }}>What this means</p>
+                      <p>{meaning}</p>
+                    </div>
+                  ))}
+                  {whyReason && (
+                    <div className="p-3 rounded-lg text-sm" style={{ background: dark ? '#141f35' : '#f8fafc', color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
+                      <p className="text-xs font-semibold mb-1" style={{ color: 'var(--muted-foreground)' }}>Why we're asking</p>
+                      <p>{whyReason}</p>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
 
           <div
@@ -622,6 +641,23 @@ export default function WorkshopRoom({ dark, onNavigate, assessmentId, onAssessm
               <p className="font-serif text-base mb-2" style={{ color: 'var(--foreground)', lineHeight: 1.6 }}>
                 {session?.pending_clarification}
               </p>
+              {(() => {
+                const meanings = (session?.why_asking || '')
+                  .split(/\n\n+/)
+                  .map(part => part.trim())
+                  .filter(Boolean)
+                  .slice(0, -1)
+                if (!meanings.length) return null
+                return (
+                  <div className="space-y-2 mb-3">
+                    {meanings.map(meaning => (
+                      <p key={meaning.slice(0, 48)} className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.6 }}>
+                        {meaning}
+                      </p>
+                    ))}
+                  </div>
+                )
+              })()}
               {session?.coverage_confirmation && (
                 <p className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.6 }}>
                   {session.coverage_confirmation}
