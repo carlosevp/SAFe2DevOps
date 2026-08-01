@@ -21,3 +21,5 @@ data:
   ENABLE_ADMIN_INTEGRATION_DIAGNOSTICS: "false"
   INTEGRATION_HTTP_TIMEOUT_SECONDS: "20"
   INTEGRATION_HTTP_CONNECT_TIMEOUT_SECONDS: "5"
+  # Optional; leave empty unless the tenant stores acceptance criteria in a custom field.
+  JIRA_ACCEPTANCE_CRITERIA_FIELD_ID: ""

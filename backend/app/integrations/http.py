@@ -32,6 +32,7 @@ ALLOWED_INTEGRATION_HOST_SUFFIXES = (
 )
 
 ERROR_CATEGORY_BY_STATUS = {
+    400: "bad_request",
     401: "authentication_failed",
     403: "permission_denied",
     404: "not_found_or_wrong_base",
@@ -57,6 +58,22 @@ def sanitize_host(url_or_host: str) -> str:
         return raw.split("/")[0].lower()
     parsed = urlparse(raw)
     return (parsed.hostname or "").lower()
+
+
+def join_integration_url(base_url: str, path: str) -> str:
+    """Join a provider base URL with an API path without dropping path prefixes.
+
+    Unlike urllib.parse.urljoin / httpx.URL.join, a leading slash on ``path`` must
+    not discard prefixes such as ``/ex/jira/{cloudId}`` or ``/{adoOrg}``.
+    Absolute http(s) paths are returned unchanged.
+    """
+    cleaned_path = (path or "").strip()
+    if cleaned_path.startswith("https://") or cleaned_path.startswith("http://"):
+        return cleaned_path
+    base = (base_url or "").strip().rstrip("/")
+    if not base:
+        return cleaned_path
+    return f"{base}/{cleaned_path.lstrip('/')}"
 
 
 def validate_https_url(url: str, *, label: str, allow_api_gateway: bool = False) -> str:
@@ -205,8 +222,22 @@ def normalize_ado_org_url(value: str) -> str:
 
 
 def sanitize_remote_text(value: Any, *, max_len: int = 4000) -> str:
-    """Treat remote text as untrusted; strip control chars and bound length."""
-    text = "" if value is None else str(value)
+    """Treat remote text as untrusted; strip control chars and bound length.
+
+    Structured remote values (dicts/lists) are not converted via ``str()`` because
+    that yields misleading Python repr text for ADF/JSON payloads. Callers should
+    convert structured content (e.g. ADF) to plain text before sanitizing.
+    """
+    if value is None:
+        text = ""
+    elif isinstance(value, str):
+        text = value
+    elif isinstance(value, (int, float, bool)):
+        text = str(value)
+    elif isinstance(value, (dict, list, tuple, set)):
+        text = ""
+    else:
+        text = ""
     cleaned = "".join(ch for ch in text if ch == "\n" or ch == "\t" or ord(ch) >= 32)
     lowered = cleaned.lower()
     for marker in ("ignore previous instructions", "system:", "<<", "```"):
@@ -245,12 +276,17 @@ def request_json(
     page_number: int | None = None,
 ) -> Any:
     last_error: Exception | None = None
-    host = sanitize_host(str(client.base_url) if client.base_url else url)
+    base = str(client.base_url) if client.base_url else ""
+    resolved_url = join_integration_url(base, url) if base else url
+    host = sanitize_host(base or resolved_url)
     path_template = endpoint_template or url
     for attempt in range(1, MAX_RETRIES + 1):
         timed = TimedOperation()
         try:
-            response = client.request(method, url, params=params, json=json_body, headers=headers)
+            # Pass an absolute URL so RFC-style joiners cannot drop base path prefixes.
+            response = client.request(
+                method, resolved_url, params=params, json=json_body, headers=headers
+            )
             elapsed = timed.elapsed_ms()
             correlation = (
                 response.headers.get("x-request-id")
@@ -380,16 +416,31 @@ def with_client(
     headers: dict[str, str],
     fn: Callable[[httpx.Client], T],
     *,
+    auth: httpx.Auth | tuple[str, str] | None = None,
     timeout: httpx.Timeout | None = None,
 ) -> T:
+    """Open an outbound HTTPS client for Jira/ADO.
+
+    Mimics the working curl shape for classic Jira Cloud:
+    ``curl --request GET --url "https://{site}.atlassian.net/rest/api/3/..." --user "email:token"``
+
+    TLS certificate validation stays enabled (``verify`` is never False). Windows curl's
+    ``--ssl-no-revoke`` only skips CRL/OCSP revocation checks under Schannel; it is not
+    the same as ``--insecure``. Python/OpenSSL in our runtime does not enable that
+    Windows revocation path by default. For corporate MITM CAs, set REQUESTS_CA_BUNDLE
+    or SSL_CERT_FILE to a trusted bundle instead of disabling verification.
+    """
     # httpx honors HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY by default (trust_env=True).
-    verify = True
+    verify: bool | str = True
     ca_bundle = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE")
     if ca_bundle:
         verify = ca_bundle
+    # Trailing slash keeps path prefixes (e.g. /ex/jira/{cloudId}/) stable under httpx.
+    normalized_base = (base_url or "").rstrip("/") + "/"
     with httpx.Client(
-        base_url=base_url,
+        base_url=normalized_base,
         headers=headers,
+        auth=auth,
         timeout=timeout or integration_timeout(),
         follow_redirects=False,
         trust_env=True,

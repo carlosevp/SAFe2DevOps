@@ -33,9 +33,12 @@ class JiraIssue:
     created: datetime
     resolved: datetime | None
     summary: str
+    description: str | None = None
     acceptance_criteria: str | None = None
-    reopened: bool = False
+    # None means reopened status was not determined (changelog missing/partial).
+    reopened: bool | None = None
     changelog: list[dict[str, Any]] = field(default_factory=list)
+    changelog_partial: bool = True
 
 
 @dataclass(slots=True)

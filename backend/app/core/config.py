@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # Outbound HTTPS for integrations (honors HTTP(S)_PROXY via httpx defaults).
     integration_http_timeout_seconds: float = 20.0
     integration_http_connect_timeout_seconds: float = 5.0
+    # Optional Jira custom field id for acceptance criteria (e.g. customfield_10000).
+    # When unset, description is not treated as acceptance criteria.
+    jira_acceptance_criteria_field_id: str = ""
 
     @field_validator(
         "data_dir",

@@ -66,11 +66,13 @@ class MockJiraProvider:
                     created=created,
                     resolved=resolved,
                     summary=sanitize_remote_text(summary),
+                    description="Mock description" if idx % 3 == 0 else None,
                     acceptance_criteria="Given/When/Then" if idx % 2 == 0 else None,
                     reopened=idx % 17 == 0,
                     changelog=[{"field": "status", "from": "In Progress", "to": "Done"}]
                     if resolved
                     else [],
+                    changelog_partial=False,
                 )
             )
         # Return in pages for callers that paginate; here we expose full set and page helpers.

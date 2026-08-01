@@ -73,6 +73,7 @@ def get_jira_provider(db: Session, settings: Settings | None = None) -> JiraProv
             sanitized_external_error=exc.message,
         )
         raise
+    ac_field = (settings.jira_acceptance_criteria_field_id or "").strip() or None
     return LiveJiraProvider(
         site_url=record.jira_site_url,
         email=record.jira_service_account_email,
@@ -80,6 +81,7 @@ def get_jira_provider(db: Session, settings: Settings | None = None) -> JiraProv
         credential_mode=getattr(record, "jira_credential_mode", None) or JIRA_CREDENTIAL_CLASSIC,
         cloud_id=getattr(record, "jira_cloud_id", None),
         integration_config_id=record.id,
+        acceptance_criteria_field_id=ac_field,
     )
 
 
