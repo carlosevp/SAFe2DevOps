@@ -3,18 +3,28 @@ import { ChevronRight, ChevronLeft, Check, Info, Copy, Users, Laptop, Globe } fr
 import {
   collectEvidence,
   createAssessment,
+  getIntegrationSetupState,
   listAdoBranches,
   listAdoPipelines,
   listAdoProjects,
   listAdoRepos,
   listJiraBoards,
   listJiraProjects,
+  refreshAdoCatalog,
+  refreshJiraCatalog,
   setSourceSelection,
   upsertTechnologyContext,
   type CatalogPipeline,
   type CatalogProject,
   type CatalogRepo,
+  type ProviderSetupState,
 } from '../lib/api'
+import {
+  availabilityLabel,
+  isProviderSelectable,
+  permissionHint,
+  shouldShowRetry,
+} from '../lib/integrationAvailability'
 import type { Screen } from '../types'
 
 interface Props {
@@ -218,6 +228,9 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
   const [jiraProjectKey, setJiraProjectKey] = useState('')
   const [jiraBoardId, setJiraBoardId] = useState('')
   const [jiraJql, setJiraJql] = useState('')
+  const [jiraSetup, setJiraSetup] = useState<ProviderSetupState | null>(null)
+  const [adoSetup, setAdoSetup] = useState<ProviderSetupState | null>(null)
+  const [catalogLoading, setCatalogLoading] = useState(true)
 
   const [adoProjects, setAdoProjects] = useState<CatalogProject[]>([])
   const [adoRepos, setAdoRepos] = useState<CatalogRepo[]>([])
@@ -243,15 +256,37 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
   const cardBg = 'var(--card)'
 
+  async function loadIntegrationCatalogs() {
+    setCatalogLoading(true)
+    setError(null)
+    try {
+      const setup = await getIntegrationSetupState()
+      setJiraSetup(setup.jira)
+      setAdoSetup(setup.ado)
+      const [jira, ado] = await Promise.all([
+        isProviderSelectable(setup.jira) || setup.jira.catalog_count > 0 || setup.jira.availability === 'configured_loading_catalog'
+          ? listJiraProjects().catch(() => [])
+          : Promise.resolve([] as CatalogProject[]),
+        isProviderSelectable(setup.ado) || setup.ado.catalog_count > 0 || setup.ado.availability === 'configured_loading_catalog'
+          ? listAdoProjects().catch(() => [])
+          : Promise.resolve([] as CatalogProject[]),
+      ])
+      setJiraProjects(jira)
+      setAdoProjects(ado)
+      if (jira[0]?.key && isProviderSelectable(setup.jira)) setJiraProjectKey(prev => prev || jira[0].key || '')
+      if (ado[0]?.id && isProviderSelectable(setup.ado)) setAdoProjectId(prev => prev || ado[0].id)
+      const refreshed = await getIntegrationSetupState()
+      setJiraSetup(refreshed.jira)
+      setAdoSetup(refreshed.ado)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load catalog')
+    } finally {
+      setCatalogLoading(false)
+    }
+  }
+
   useEffect(() => {
-    Promise.all([listJiraProjects(), listAdoProjects()])
-      .then(([jira, ado]) => {
-        setJiraProjects(jira)
-        setAdoProjects(ado)
-        if (jira[0]?.key) setJiraProjectKey(jira[0].key)
-        if (ado[0]?.id) setAdoProjectId(ado[0].id)
-      })
-      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load catalog'))
+    void loadIntegrationCatalogs()
   }, [])
 
   useEffect(() => {
@@ -316,6 +351,8 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
     setTimeout(() => setLinkCopied(false), 2000)
   }
 
+  const jiraSelectable = isProviderSelectable(jiraSetup)
+  const adoSelectable = isProviderSelectable(adoSetup)
   const jiraSkipped = !jiraProjectKey
   const adoSkipped = !adoProjectId
   const scopeStatement = jiraSkipped && adoSkipped
@@ -507,12 +544,34 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
                 Choose a representative Jira project, or skip Jira if the interview should be the source for planning and flow evidence.
               </p>
             </div>
+            <div className="rounded-lg px-3 py-2 text-xs flex items-center justify-between gap-3" style={{ background: 'var(--muted)', color: 'var(--foreground)' }}>
+              <span>
+                {catalogLoading ? 'Configured — loading catalog' : availabilityLabel(jiraSetup?.availability)}
+                {jiraSetup?.catalog_stale ? ' · using cached catalog' : ''}
+              </span>
+              {shouldShowRetry(jiraSetup?.availability) && (
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => {
+                    void refreshJiraCatalog()
+                      .then(() => loadIntegrationCatalogs())
+                      .catch(err => setError(err instanceof Error ? err.message : 'Jira refresh failed'))
+                  }}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+            {permissionHint(jiraSetup?.availability) && (
+              <p className="text-xs" style={{ color: '#9a3412' }}>{permissionHint(jiraSetup?.availability)}</p>
+            )}
             <SourceModeChoice
               dark={dark}
               toolLabel="Jira"
-              interviewOnly={jiraSkipped}
+              interviewOnly={jiraSkipped || !jiraSelectable}
               onChange={skip => {
-                if (skip) {
+                if (skip || !jiraSelectable) {
                   setJiraProjectKey('')
                   setJiraBoardId('')
                   setJiraJql('')
@@ -521,14 +580,23 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
                 }
               }}
             />
-            {!jiraSkipped && (
+            {!jiraSkipped && jiraSelectable && (
               <>
                 <div>
                   <Label>Jira project</Label>
                   <SelectField
                     value={jiraProjectKey}
-                    onChange={setJiraProjectKey}
-                    options={jiraProjects.map(p => ({ value: p.key || p.id, label: `${p.key} — ${p.name}` }))}
+                    onChange={value => {
+                      setJiraProjectKey(value)
+                      setJiraBoardId('')
+                      setJiraJql('')
+                    }}
+                    options={
+                      jiraProjects.length
+                        ? jiraProjects.map(p => ({ value: p.key || p.id, label: `${p.key} — ${p.name}` }))
+                        : [{ value: '', label: 'No projects visible' }]
+                    }
+                    disabled={!jiraProjects.length}
                   />
                 </div>
                 <div>
@@ -570,12 +638,36 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
                 Choose one representative repository, or skip Azure DevOps if the interview should be the source for delivery evidence.
               </p>
             </div>
+            <div className="rounded-lg px-3 py-2 text-xs flex items-center justify-between gap-3" style={{ background: 'var(--muted)', color: 'var(--foreground)' }}>
+              <span>
+                {catalogLoading ? 'Configured — loading catalog' : availabilityLabel(adoSetup?.availability)}
+                {adoSetup?.catalog_stale ? ' · using cached catalog' : ''}
+              </span>
+              {shouldShowRetry(adoSetup?.availability) && (
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => {
+                    void refreshAdoCatalog()
+                      .then(() => loadIntegrationCatalogs())
+                      .catch(err => setError(err instanceof Error ? err.message : 'ADO refresh failed'))
+                  }}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+            {permissionHint(adoSetup?.availability, adoSetup?.capabilities?.last_error_category as string | undefined) && (
+              <p className="text-xs" style={{ color: '#9a3412' }}>
+                {permissionHint(adoSetup?.availability, adoSetup?.capabilities?.last_error_category as string | undefined)}
+              </p>
+            )}
             <SourceModeChoice
               dark={dark}
               toolLabel="Azure DevOps"
-              interviewOnly={adoSkipped}
+              interviewOnly={adoSkipped || !adoSelectable}
               onChange={skip => {
-                if (skip) {
+                if (skip || !adoSelectable) {
                   setAdoProjectId('')
                   setAdoRepoId('')
                   setAdoRepos([])
@@ -586,21 +678,38 @@ export default function SetupWizard({ dark, onNavigate, onAssessmentReady }: Pro
                 }
               }}
             />
-            {!adoSkipped && (
+            {!adoSkipped && adoSelectable && (
               <>
                 <div>
                   <Label>Project</Label>
                   <SelectField
                     value={adoProjectId}
-                    onChange={setAdoProjectId}
-                    options={adoProjects.map(p => ({ value: p.id, label: p.name }))}
+                    onChange={value => {
+                      setAdoProjectId(value)
+                      setAdoRepoId('')
+                      setAdoRepos([])
+                      setAdoBranches([])
+                      setAdoPipelines([])
+                      setSelectedPipelineIds([])
+                    }}
+                    options={
+                      adoProjects.length
+                        ? adoProjects.map(p => ({ value: p.id, label: p.name }))
+                        : [{ value: '', label: 'No projects visible' }]
+                    }
+                    disabled={!adoProjects.length}
                   />
                 </div>
                 <div>
                   <Label>Repository</Label>
                   <SelectField
                     value={adoRepoId}
-                    onChange={setAdoRepoId}
+                    onChange={value => {
+                      setAdoRepoId(value)
+                      setAdoBranches([])
+                      setAdoPipelines([])
+                      setSelectedPipelineIds([])
+                    }}
                     options={adoRepos.map(r => ({ value: r.id, label: r.name }))}
                     disabled={!adoProjectId}
                   />

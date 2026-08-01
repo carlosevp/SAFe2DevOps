@@ -9,8 +9,9 @@ JIRA_REQUIRED_PERMISSIONS = [
 ]
 
 JIRA_PERMISSIONS_NOTE = (
-    "Requires read-only access: browse projects, view issues, and view workflow transitions. "
-    "Service account credentials are encrypted at rest and never displayed in full after saving."
+    "Requires read-only access: Browse Projects, View Issues, and workflow transition visibility. "
+    "Classic tokens use the site URL; scoped service-account tokens use api.atlassian.com with a "
+    "cloudId. Credentials are encrypted at rest and never displayed after saving."
 )
 
 ADO_REQUIRED_SCOPES = [

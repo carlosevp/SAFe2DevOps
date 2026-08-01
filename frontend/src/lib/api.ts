@@ -47,25 +47,88 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return payload as T
 }
 
+export type ProviderAvailability =
+  | 'not_configured'
+  | 'configured_loading_catalog'
+  | 'ready'
+  | 'ready_cached'
+  | 'refresh_failed_cached_available'
+  | 'credentials_accepted_no_projects'
+  | 'additional_permission_required'
+  | 'temporarily_unavailable'
+  | 'administratively_disabled'
+  | 'credentials_undecryptable'
+
+export type ProviderSetupState = {
+  availability: ProviderAvailability | string
+  capabilities: Record<string, unknown>
+  catalog_stale: boolean
+  catalog_count: number
+  selectable: boolean
+}
+
 export type IntegrationStatus = {
   jira_site_url: string | null
   jira_service_account_email: string | null
   jira_token_configured: boolean
+  jira_credential_mode?: string
+  jira_cloud_id?: string | null
+  jira_enabled_by_admin?: boolean
   jira_status: string
   jira_last_validated_at: string | null
   jira_last_error: string | null
+  jira_last_error_category?: string | null
+  jira_capabilities?: Record<string, unknown>
+  jira_catalog_stale?: boolean
+  jira_last_catalog_refresh_status?: string | null
+  jira_last_catalog_refresh_at?: string | null
+  jira_last_successful_catalog_refresh_at?: string | null
   ado_org_url: string | null
   ado_pat_configured: boolean
+  ado_enabled_by_admin?: boolean
   ado_status: string
   ado_last_validated_at: string | null
   ado_last_error: string | null
+  ado_last_error_category?: string | null
+  ado_capabilities?: Record<string, unknown>
+  ado_catalog_stale?: boolean
+  ado_last_catalog_refresh_status?: string | null
+  ado_last_catalog_refresh_at?: string | null
+  ado_last_successful_catalog_refresh_at?: string | null
   catalog_refreshed_at: string | null
   jira_permissions_note: string
   ado_permissions_note: string
   provider_mode: string
+  setup_state?: { jira: ProviderSetupState; ado: ProviderSetupState }
+  diagnostics_enabled?: boolean
 }
 
-export type CatalogProject = { id: string; key?: string | null; name: string }
+export type IntegrationDiagnostics = {
+  provider: string
+  configured_site_or_org?: string | null
+  resolved_api_host?: string | null
+  cloud_id_present?: boolean | null
+  credential_mode?: string | null
+  identity_test?: string | null
+  project_catalog_test?: string | null
+  issue_search_test?: string | null
+  repository_test?: string | null
+  pipeline_build_test?: string | null
+  visible_project_count?: number | null
+  last_successful_refresh_at?: string | null
+  error_category?: string | null
+  corrective_action?: string | null
+  message?: string | null
+  capabilities?: Record<string, unknown>
+}
+
+export type CatalogProject = {
+  id: string
+  key?: string | null
+  name: string
+  project_type_key?: string | null
+  style?: string | null
+}
 export type CatalogRepo = { id: string; name: string; default_branch: string }
 export type CatalogPipeline = { id: string; name: string; runs?: number | null; success_rate?: string | null }
 
@@ -115,24 +178,57 @@ export function getIntegrations() {
   return apiFetch<IntegrationStatus>('/api/integrations')
 }
 
-export function saveJiraCredentials(body: { site_url: string; service_account_email: string; api_token?: string }) {
+export function saveJiraCredentials(body: {
+  site_url: string
+  service_account_email: string
+  api_token?: string
+  credential_mode?: 'classic_account_api_token' | 'scoped_service_account_token'
+  cloud_id?: string | null
+  enabled_by_admin?: boolean
+}) {
   return apiFetch<IntegrationStatus>('/api/integrations/jira', { method: 'PUT', body: JSON.stringify(body) })
 }
 
-export function saveAdoCredentials(body: { org_url: string; pat?: string }) {
+export function saveAdoCredentials(body: { org_url: string; pat?: string; enabled_by_admin?: boolean }) {
   return apiFetch<IntegrationStatus>('/api/integrations/ado', { method: 'PUT', body: JSON.stringify(body) })
 }
 
 export function testJiraConnection() {
-  return apiFetch<{ ok: boolean; message: string; tested_at: string }>('/api/integrations/jira/test', { method: 'POST' })
+  return apiFetch<{ ok: boolean; message: string; tested_at: string; error_category?: string | null; capabilities?: Record<string, unknown> }>(
+    '/api/integrations/jira/test',
+    { method: 'POST' },
+  )
 }
 
 export function testAdoConnection() {
-  return apiFetch<{ ok: boolean; message: string; tested_at: string }>('/api/integrations/ado/test', { method: 'POST' })
+  return apiFetch<{ ok: boolean; message: string; tested_at: string; error_category?: string | null; capabilities?: Record<string, unknown> }>(
+    '/api/integrations/ado/test',
+    { method: 'POST' },
+  )
 }
 
 export function refreshCatalog() {
   return apiFetch<IntegrationStatus>('/api/integrations/catalog/refresh', { method: 'POST' })
+}
+
+export function refreshJiraCatalog() {
+  return apiFetch<IntegrationStatus>('/api/integrations/catalog/refresh/jira', { method: 'POST' })
+}
+
+export function refreshAdoCatalog() {
+  return apiFetch<IntegrationStatus>('/api/integrations/catalog/refresh/ado', { method: 'POST' })
+}
+
+export function getIntegrationSetupState() {
+  return apiFetch<{ jira: ProviderSetupState; ado: ProviderSetupState }>('/api/integrations/setup-state')
+}
+
+export function runJiraDiagnostics() {
+  return apiFetch<IntegrationDiagnostics>('/api/integrations/diagnostics/jira', { method: 'POST' })
+}
+
+export function runAdoDiagnostics() {
+  return apiFetch<IntegrationDiagnostics>('/api/integrations/diagnostics/ado', { method: 'POST' })
 }
 
 export function listJiraProjects() {
@@ -872,6 +968,26 @@ export type PublishedResults = {
   chart_summary: string
   scores: Record<string, number>
   enterprise_standards?: PublishedEnterpriseStandards | null
+  detailed_review?: Record<string, unknown> | null
+  detailed_review_incomplete?: boolean
+}
+
+export function getDetailedReportDraft(assessmentId: string) {
+  return apiFetch<Record<string, unknown>>(`/api/assessments/${assessmentId}/review/detailed-report`)
+}
+
+export function generateDetailedReport(assessmentId: string, section?: string) {
+  return apiFetch<Record<string, unknown>>(`/api/assessments/${assessmentId}/review/detailed-report/generate`, {
+    method: 'POST',
+    body: JSON.stringify({ section: section || null }),
+  })
+}
+
+export function editDetailedReportSection(assessmentId: string, section: string, content: Record<string, unknown>) {
+  return apiFetch<Record<string, unknown>>(`/api/assessments/${assessmentId}/review/detailed-report/section`, {
+    method: 'PUT',
+    body: JSON.stringify({ section, content }),
+  })
 }
 
 export function startReview(assessmentId: string) {

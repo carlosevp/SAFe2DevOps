@@ -20,6 +20,7 @@ from app.schemas.scoring import (
     PublishedResultsOut,
 )
 from app.services.audit import AuditService
+from app.services.detailed_report import DetailedReportService
 from app.services.enterprise_standards import EnterpriseStandardsService
 from app.services.exports import resolve_export_path, write_json_export, write_pdf_export
 from app.services.lifecycle import LifecycleService
@@ -261,6 +262,13 @@ class PublicationService:
             list(enterprise.get("recommendation_cards") or []),
         )
 
+        detailed_service = DetailedReportService(self.db)
+        detailed = detailed_service.get_draft(assessment_id)
+        if detailed is None:
+            detailed = detailed_service.generate(assessment_id, actor=published_by)
+        detailed_payload = detailed.model_dump()
+        detailed_incomplete = bool(detailed.generation_metadata.incomplete)
+
         version = self.publications.next_version(assessment_id)
         report = PublishedReport(
             assessment_id=assessment_id,
@@ -298,6 +306,7 @@ class PublicationService:
             ai_vs_final_json=json.dumps(ai_vs_final),
             chart_summary=chart_summary,
             enterprise_standards_json=json.dumps(enterprise),
+            detailed_report_json=json.dumps(detailed_payload),
         )
         self.publications.add(report)
         self.db.flush()
@@ -325,6 +334,8 @@ class PublicationService:
             "prompt_config_version": report.prompt_config_version,
             "model_name": report.model_name,
             "enterprise_standards": enterprise,
+            "detailed_review": detailed_payload,
+            "detailed_review_incomplete": detailed_incomplete,
         }
         # Public export must never include AI candidate comparison or numeric enterprise scores.
         dumped = json.dumps(public_payload)
@@ -339,7 +350,15 @@ class PublicationService:
             report.title,
             f"Version {version} · Published {report.published_at.date().isoformat()}",
             "",
-            "1. SAFe DevOps Maturity",
+            "1. Cover and assessment scope",
+            f"Team/product: {assessment.team_name} / {assessment.product_service_name}",
+            f"Evidence period: {assessment.lookback_days} days",
+            f"Evidence influence mode: {assessment.evidence_influence_mode}",
+            "",
+            "2. Executive summary",
+            detailed.executive_narrative.narrative[:2000],
+            "",
+            "3. SAFe DevOps Maturity (radar/heatmap summarized)",
             f"Overall maturity: {report.overall_maturity}/5.0",
             f"Confidence: {report.confidence_summary}",
             f"Evidence quality: {report.evidence_quality}",
@@ -372,7 +391,7 @@ class PublicationService:
                 f"- {card.get('standard')} ({card.get('requirement_level')}, {card.get('status')}): "
                 f"{card.get('observation') or card.get('recommendation')}"
             )
-        pdf_lines.extend(["", "3. Consolidated Improvement Plan"])
+        pdf_lines.extend(["", "4. Key actions / Consolidated Improvement Plan"])
         for item in improvement_plan[:12]:
             practices = ", ".join(item.get("related_practice_keys") or []) or "-"
             standards = (
@@ -387,6 +406,35 @@ class PublicationService:
                 f"- {item.get('title')}: {item.get('recommended_action')} "
                 f"[practices: {practices}; standards: {standards}]"
             )
+        if detailed_incomplete:
+            pdf_lines.extend(
+                [
+                    "",
+                    "WARNING: Detailed Assessment Review is incomplete. "
+                    "Some sections failed generation and should be regenerated before relying on depth.",
+                ]
+            )
+        pdf_lines.extend(["", "5. Detailed domain reviews"])
+        for domain in detailed.domain_reviews:
+            pdf_lines.append(f"- {domain.domain_name}: {domain.current_state_narrative[:500]}")
+            for example in domain.illustrative_examples[:1]:
+                pdf_lines.append(f"  Illustrative example: {example.text[:400]}")
+        pdf_lines.extend(["", "6. Practice drill-downs"])
+        for practice in detailed.practice_reviews[:16]:
+            pdf_lines.append(
+                f"- {practice.practice_name} ({practice.final_score}): {practice.interpretation[:300]}"
+            )
+        pdf_lines.extend(["", "7. Enterprise standards"])
+        pdf_lines.append(detailed.enterprise_standards_review.relationship_to_safe)
+        pdf_lines.extend(["", "8. Roadmap and KPIs"])
+        for item in detailed.roadmap_context[:10]:
+            pdf_lines.append(
+                f"- {item.action_title} [{item.time_horizon}] KPI: {item.kpi_signal}"
+            )
+        pdf_lines.extend(["", "9. Evidence and limitations"])
+        pdf_lines.append(detailed.evidence_limitations.confidence_explanation[:800])
+        for lim in detailed.evidence_limitations.missing_or_unreliable[:8]:
+            pdf_lines.append(f"- {lim}")
         report.export_pdf_relpath = write_pdf_export(
             self.storage, assessment_id, version, pdf_lines
         )
@@ -450,6 +498,16 @@ class PublicationService:
         else:
             heatmap = self.scoring.heatmap(assessment, use_final=True)
 
+        detailed_raw = None
+        detailed_incomplete = False
+        if report.detailed_report_json:
+            try:
+                detailed_raw = json.loads(report.detailed_report_json)
+                detailed_incomplete = bool(
+                    (detailed_raw.get("generation_metadata") or {}).get("incomplete")
+                )
+            except json.JSONDecodeError:
+                detailed_raw = None
         return PublishedResultsOut(
             assessment_id=assessment_id,
             version=report.version,
@@ -473,6 +531,8 @@ class PublicationService:
             scores=scores,
             enterprise_standards=json.loads(report.enterprise_standards_json or "{}")
             or self.enterprise.published_section(assessment_id),
+            detailed_review=detailed_raw,
+            detailed_review_incomplete=detailed_incomplete,
         )
 
     def get_admin_comparison(

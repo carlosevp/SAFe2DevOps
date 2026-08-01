@@ -5,6 +5,8 @@ import {
   addReviewObservation,
   approveReview,
   editRecommendation,
+  generateDetailedReport,
+  getDetailedReportDraft,
   getReview,
   listReviewEnterpriseStandards,
   markEvidenceUnreliable,
@@ -26,7 +28,7 @@ interface Props {
   assessmentId?: string | null
 }
 
-const ADMIN_NAV = ['Overview', 'Evidence', 'Interview transcript', 'Practice coverage', 'Enterprise Standards', 'Candidate scores', 'Improvement plan', 'Publication']
+const ADMIN_NAV = ['Overview', 'Evidence', 'Interview transcript', 'Practice coverage', 'Enterprise Standards', 'Candidate scores', 'Improvement plan', 'Detailed Review', 'Publication']
 
 const FINDING_STATUSES: StandardFindingStatus[] = [
   'aligned',
@@ -49,6 +51,8 @@ export default function AdminReview({ dark, onNavigate, assessmentId }: Props) {
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [detailedReport, setDetailedReport] = useState<Record<string, unknown> | null>(null)
+  const [detailedBusy, setDetailedBusy] = useState(false)
   const cardBorder = dark ? '#1e3358' : '#e2e8f0'
   const scoreColors = ['', '#dc2626', '#f59e0b', '#3b7dd8', '#10b981', '#059669']
 
@@ -509,6 +513,59 @@ export default function AdminReview({ dark, onNavigate, assessmentId }: Props) {
                     <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>KPI: {action.kpi} · Priority {action.priority}</p>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {navItem === 'Detailed Review' && assessmentId && (
+              <div className="animate-fade-in space-y-4">
+                <p className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
+                  Generate a comprehensive Detailed Assessment Review without replacing the concise improvement plan.
+                  Illustrative examples are labeled and must not be treated as observed team behavior.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={detailedBusy}
+                    onClick={() => {
+                      setDetailedBusy(true)
+                      void generateDetailedReport(assessmentId)
+                        .then(setDetailedReport)
+                        .catch(err => setError(err instanceof Error ? err.message : 'Detailed report generation failed'))
+                        .finally(() => setDetailedBusy(false))
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium"
+                    style={{ background: 'var(--primary)', color: '#fff', opacity: detailedBusy ? 0.7 : 1 }}
+                  >
+                    <RefreshCw size={14} className={detailedBusy ? 'animate-spin' : ''} />
+                    {detailedBusy ? 'Generating…' : 'Generate / regenerate full detailed report'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void getDetailedReportDraft(assessmentId)
+                        .then(data => setDetailedReport(data.detailed_review === null ? null : data))
+                        .catch(err => setError(err instanceof Error ? err.message : 'Unable to load detailed report'))
+                    }}
+                    className="px-3 py-2 rounded-lg text-sm"
+                    style={{ background: 'var(--muted)', color: 'var(--foreground)', border: `1px solid ${cardBorder}` }}
+                  >
+                    Reload draft
+                  </button>
+                </div>
+                {detailedReport && (
+                  <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+                    {Boolean((detailedReport.generation_metadata as { incomplete?: boolean } | undefined)?.incomplete) && (
+                      <p className="text-xs" style={{ color: '#9a3412' }}>Incomplete detailed report — regenerate failed sections before publish if possible.</p>
+                    )}
+                    <p className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
+                      {(detailedReport.executive_narrative as { narrative?: string } | undefined)?.narrative || 'No executive narrative yet.'}
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                      Domains: {((detailedReport.domain_reviews as unknown[]) || []).length} · Practices:{' '}
+                      {((detailedReport.practice_reviews as unknown[]) || []).length}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

@@ -4,12 +4,18 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+JIRA_CREDENTIAL_CLASSIC = "classic_account_api_token"
+JIRA_CREDENTIAL_SCOPED = "scoped_service_account_token"
+JIRA_CREDENTIAL_MODES = frozenset({JIRA_CREDENTIAL_CLASSIC, JIRA_CREDENTIAL_SCOPED})
+
 
 @dataclass(slots=True)
 class JiraProject:
     key: str
     name: str
     id: str
+    project_type_key: str | None = None
+    style: str | None = None
 
 
 @dataclass(slots=True)
@@ -48,3 +54,20 @@ class JiraNormalizedEvidence:
     quality: str
     metrics: list[dict[str, Any]]
     raw_issue_count: int
+
+
+@dataclass(slots=True)
+class JiraCapabilityResult:
+    configured: bool = False
+    credentials_decryptable: bool = False
+    identity_authenticated: bool = False
+    project_catalog_accessible: bool = False
+    issue_search_accessible: bool | None = None
+    visible_project_count: int = 0
+    resolved_api_host: str | None = None
+    cloud_id_present: bool = False
+    credential_mode: str | None = None
+    display_name: str | None = None
+    last_error_category: str | None = None
+    last_error_message: str | None = None
+    corrective_action: str | None = None

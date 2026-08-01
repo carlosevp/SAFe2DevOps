@@ -235,8 +235,49 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
           </div>
         </section>
 
+        {results.detailed_review && (
+          <section className="mb-10">
+            <SectionHeading number="02" title="Detailed Assessment Review" />
+            {results.detailed_review_incomplete && (
+              <p className="text-sm mb-4 rounded-lg px-3 py-2" style={{ background: dark ? '#3b1f0b' : '#fff7ed', color: dark ? '#fdba74' : '#9a3412' }}>
+                This detailed review is incomplete. Some sections failed generation and should be regenerated before relying on depth.
+              </p>
+            )}
+            <p className="text-sm mb-4" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
+              {(results.detailed_review as { executive_narrative?: { narrative?: string } }).executive_narrative?.narrative ||
+                'Detailed narrative is available in the published JSON/PDF export.'}
+            </p>
+            <div className="space-y-3 mb-4">
+              {((results.detailed_review as { domain_reviews?: Array<{ domain_name: string; current_state_narrative: string; illustrative_examples?: Array<{ kind: string; text: string }> }> }).domain_reviews || []).map(domain => (
+                <div key={domain.domain_name} className="rounded-xl p-4" style={{ background: 'var(--card)', border: `1px solid ${cardBorder}` }}>
+                  <p className="text-sm font-semibold mb-2" style={{ color: 'var(--foreground)' }}>{domain.domain_name}</p>
+                  <p className="text-sm mb-2" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>{domain.current_state_narrative}</p>
+                  {(domain.illustrative_examples || []).slice(0, 1).map((ex, idx) => (
+                    <p key={idx} className="text-xs italic" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>
+                      [{ex.kind === 'illustrative_example' ? 'Illustrative example' : ex.kind}] {ex.text}
+                    </p>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <details className="rounded-xl p-4" style={{ background: 'var(--muted)', border: `1px solid ${cardBorder}` }}>
+              <summary className="text-sm font-medium cursor-pointer" style={{ color: 'var(--foreground)' }}>
+                Sixteen-practice drill-down
+              </summary>
+              <div className="mt-3 space-y-2">
+                {((results.detailed_review as { practice_reviews?: Array<{ practice_name: string; interpretation: string; final_score?: number | null }> }).practice_reviews || []).map(practice => (
+                  <div key={practice.practice_name} className="text-sm" style={{ color: 'var(--muted-foreground)', lineHeight: 1.55 }}>
+                    <span className="font-medium" style={{ color: 'var(--foreground)' }}>{practice.practice_name}</span>
+                    {practice.final_score != null ? ` · ${practice.final_score}` : ''} — {practice.interpretation}
+                  </div>
+                ))}
+              </div>
+            </details>
+          </section>
+        )}
+
         <section className="mb-10">
-          <SectionHeading number="02" title="Enterprise Standards Findings" />
+          <SectionHeading number={results.detailed_review ? '03' : '02'} title="Enterprise Standards Findings" />
           <p className="text-sm mb-5" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
             Applicable enterprise standards and findings. These enrich recommendations and do not alter the SAFe maturity score.
           </p>
@@ -294,7 +335,7 @@ export default function Results({ dark, onNavigate, assessmentId }: Props) {
         </section>
 
         <section className="mb-8">
-          <SectionHeading number="03" title="Consolidated Improvement Plan" />
+          <SectionHeading number={results.detailed_review ? '04' : '03'} title="Consolidated Improvement Plan" />
           <p className="text-sm mb-5" style={{ color: 'var(--muted-foreground)', lineHeight: 1.65 }}>
             Overlapping SAFe and enterprise recommendations are merged into a single action, with all related practice and standard references preserved.
           </p>

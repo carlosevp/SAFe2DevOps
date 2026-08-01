@@ -146,7 +146,7 @@ def test_connection_validation_and_secret_nondisclosure(client: TestClient) -> N
     body = save.json()
     dumped = json.dumps(body)
     assert secret not in dumped
-    assert "api_token" not in dumped
+    assert '"api_token"' not in dumped
     assert body["jira_token_configured"] is True
     assert body["jira_site_url"] == "https://claimsco.atlassian.net"
 

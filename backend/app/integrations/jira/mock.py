@@ -4,7 +4,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.integrations.http import sanitize_remote_text
-from app.integrations.jira.types import JiraBoard, JiraIssue, JiraProject
+from app.integrations.jira.types import (
+    JIRA_CREDENTIAL_CLASSIC,
+    JiraBoard,
+    JiraCapabilityResult,
+    JiraIssue,
+    JiraProject,
+)
 
 
 class MockJiraProvider:
@@ -83,3 +89,20 @@ class MockJiraProvider:
         )
         for offset in range(0, len(issues), page_size):
             yield issues[offset : offset + page_size]
+
+    def run_capability_checks(
+        self, *, project_key: str | None = None, lookback_days: int = 30
+    ) -> JiraCapabilityResult:
+        projects = self.list_projects()
+        return JiraCapabilityResult(
+            configured=True,
+            credentials_decryptable=True,
+            identity_authenticated=True,
+            project_catalog_accessible=True,
+            issue_search_accessible=True,
+            visible_project_count=len(projects),
+            resolved_api_host="claimsco.atlassian.net",
+            cloud_id_present=False,
+            credential_mode=JIRA_CREDENTIAL_CLASSIC,
+            display_name="Mock Jira Service Account",
+        )

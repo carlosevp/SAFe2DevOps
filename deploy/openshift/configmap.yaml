@@ -15,3 +15,9 @@ data:
   OPENAI_TRANSCRIPTION_MODEL: "gpt-4o-transcribe"
   OPENAI_REASONING_EFFORT: "medium"
   CORS_ORIGINS: "https://safedevops.example.com"
+  LOG_LEVEL: "INFO"
+  INTEGRATION_LOG_LEVEL: "INFO"
+  # Opt in for admin diagnostic panels in production when operators need them.
+  ENABLE_ADMIN_INTEGRATION_DIAGNOSTICS: "false"
+  INTEGRATION_HTTP_TIMEOUT_SECONDS: "20"
+  INTEGRATION_HTTP_CONNECT_TIMEOUT_SECONDS: "5"

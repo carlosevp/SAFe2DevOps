@@ -56,11 +56,18 @@ class Settings(BaseSettings):
     frontend_dist: Path | None = None
     assessment_config_path: Path | None = None
     log_level: str = "INFO"
+    integration_log_level: str = "INFO"
+    # Admin-only diagnostic panels and network/provider probes. Safe default: on
+    # outside production so local/demo works; production must opt in explicitly.
+    enable_admin_integration_diagnostics: bool | None = None
     seed_demo_data: bool = False
     integration_provider: Literal["mock", "live"] = "mock"
     interview_provider: Literal["mock", "live"] = "mock"
     # Explicit opt-in for unauthenticated mock-host admin in local/test only.
     allow_mock_host_auth: bool = False
+    # Outbound HTTPS for integrations (honors HTTP(S)_PROXY via httpx defaults).
+    integration_http_timeout_seconds: float = 20.0
+    integration_http_connect_timeout_seconds: float = 5.0
 
     @field_validator(
         "data_dir",
@@ -127,6 +134,10 @@ class Settings(BaseSettings):
                 self.data_encryption_key = secrets.token_urlsafe(48)
             else:
                 raise ValueError("DATA_ENCRYPTION_KEY is required outside development/test")
+
+        if self.enable_admin_integration_diagnostics is None:
+            # Production default off; non-production default on for operator UX.
+            self.enable_admin_integration_diagnostics = self.app_env != "production"
 
         return self
 

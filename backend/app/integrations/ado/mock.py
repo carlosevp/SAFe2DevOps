@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.integrations.ado.types import (
+    AdoCapabilityResult,
     AdoCommit,
     AdoPipeline,
     AdoPipelineRun,
@@ -150,3 +151,19 @@ class MockAdoProvider:
                 )
                 rid += 1
         return runs
+
+    def run_capability_checks(
+        self, *, project_id: str | None = None, repository_id: str | None = None
+    ) -> AdoCapabilityResult:
+        projects = self.list_projects()
+        return AdoCapabilityResult(
+            configured=True,
+            credentials_decryptable=True,
+            organization_accessible=True,
+            project_catalog_accessible=True,
+            repository_catalog_accessible=True,
+            pipeline_catalog_accessible=True,
+            visible_project_count=len(projects),
+            resolved_api_host="dev.azure.com",
+            organization="claimsco",
+        )

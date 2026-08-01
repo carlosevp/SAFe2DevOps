@@ -14,7 +14,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.logging import redact_secrets
 from app.integrations.ado.normalize import apply_exclusions, normalize_ado_evidence
-from app.integrations.factory import get_integration_providers
+from app.integrations.factory import get_ado_provider, get_jira_provider
 from app.integrations.jira.normalize import normalize_jira_issues
 from app.models import (
     Assessment,
@@ -59,22 +59,24 @@ class EvidenceService:
                 status_code=409,
             )
 
-        providers = get_integration_providers(self.db, self.settings)
         lookback = assessment.lookback_days
         jira_skipped = not (selection.jira_project_key or "").strip()
         ado_skipped = not (selection.ado_project_id or "").strip() or not (
             selection.ado_repository_id or ""
         ).strip()
 
+        jira_provider = None if jira_skipped else get_jira_provider(self.db, self.settings)
+        ado_provider = None if ado_skipped else get_ado_provider(self.db, self.settings)
+
         pipeline_names = [
             p.get("name")
             for p in json.loads(selection.selected_pipelines_json or "[]")
             if p.get("name")
         ]
-        if not ado_skipped and not pipeline_names:
+        if not ado_skipped and not pipeline_names and ado_provider is not None:
             pipeline_names = [
                 p.name
-                for p in providers.ado.list_pipelines(
+                for p in ado_provider.list_pipelines(
                     selection.ado_project_id, selection.ado_repository_name
                 )
             ]
@@ -90,8 +92,9 @@ class EvidenceService:
             jira_error = "Jira project not selected; interview is the source for work-item evidence."
         else:
             try:
+                assert jira_provider is not None
                 pages = list(
-                    providers.jira.iter_issue_pages(
+                    jira_provider.iter_issue_pages(
                         project_key=selection.jira_project_key,
                         lookback_days=lookback,
                         jql=selection.jira_jql,
@@ -111,18 +114,19 @@ class EvidenceService:
             )
         else:
             try:
-                commits = providers.ado.list_commits(
+                assert ado_provider is not None
+                commits = ado_provider.list_commits(
                     project_id=selection.ado_project_id,
                     repository_id=selection.ado_repository_id,
                     lookback_days=lookback,
                     default_branch=selection.default_branch,
                 )
-                prs = providers.ado.list_pull_requests(
+                prs = ado_provider.list_pull_requests(
                     project_id=selection.ado_project_id,
                     repository_id=selection.ado_repository_id,
                     lookback_days=lookback,
                 )
-                runs = providers.ado.list_pipeline_runs(
+                runs = ado_provider.list_pipeline_runs(
                     project_id=selection.ado_project_id,
                     pipeline_names=pipeline_names,
                     lookback_days=lookback,
@@ -328,17 +332,17 @@ class EvidenceService:
 
         # Recompute ADO metrics from stored sanitized payload + exclusion filters.
         payload = self._load_payload(snapshot)
-        providers = get_integration_providers(self.db, self.settings)
+        ado_provider = get_ado_provider(self.db, self.settings)
         assessment = self._require_assessment(snapshot.assessment_id)
         selection = assessment.source_selection
         assert selection is not None
-        commits = providers.ado.list_commits(
+        commits = ado_provider.list_commits(
             project_id=selection.ado_project_id,
             repository_id=selection.ado_repository_id,
             lookback_days=snapshot.lookback_days,
             default_branch=selection.default_branch,
         )
-        prs = providers.ado.list_pull_requests(
+        prs = ado_provider.list_pull_requests(
             project_id=selection.ado_project_id,
             repository_id=selection.ado_repository_id,
             lookback_days=snapshot.lookback_days,
@@ -348,10 +352,10 @@ class EvidenceService:
             for p in json.loads(selection.selected_pipelines_json or "[]")
             if p.get("name")
         ]
-        runs = providers.ado.list_pipeline_runs(
+        runs = ado_provider.list_pipeline_runs(
             project_id=selection.ado_project_id,
             pipeline_names=pipeline_names
-            or [p.name for p in providers.ado.list_pipelines(selection.ado_project_id)],
+            or [p.name for p in ado_provider.list_pipelines(selection.ado_project_id)],
             lookback_days=snapshot.lookback_days,
         )
         commits, prs, runs = apply_exclusions(

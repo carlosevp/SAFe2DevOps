@@ -58,6 +58,22 @@ class AdoPipelineRun:
 
 
 @dataclass(slots=True)
+class AdoCapabilityResult:
+    configured: bool = False
+    credentials_decryptable: bool = False
+    organization_accessible: bool = False
+    project_catalog_accessible: bool = False
+    repository_catalog_accessible: bool = False
+    pipeline_catalog_accessible: bool = False
+    visible_project_count: int = 0
+    resolved_api_host: str | None = None
+    organization: str | None = None
+    last_error_category: str | None = None
+    last_error_message: str | None = None
+    corrective_action: str | None = None
+
+
+@dataclass(slots=True)
 class AdoNormalizedEvidence:
     commits_in_period: int
     active_commit_days: int

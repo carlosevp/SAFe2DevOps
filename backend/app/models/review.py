@@ -31,6 +31,9 @@ class AssessmentReview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     strengths_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     maturity_gaps_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     limitations_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    # Draft + admin-edited detailed assessment review (versioned JSON).
+    detailed_report_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detailed_report_edits_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     assessment: Mapped[Assessment] = relationship(back_populates="reviews")
 
@@ -102,5 +105,7 @@ class PublishedReport(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     export_pdf_relpath: Mapped[str | None] = mapped_column(String(500), nullable=True)
     chart_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     enterprise_standards_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    # Optional detailed assessment review; null for legacy publications.
+    detailed_report_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     assessment: Mapped[Assessment] = relationship(back_populates="published_reports")

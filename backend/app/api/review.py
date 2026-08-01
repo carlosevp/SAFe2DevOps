@@ -19,6 +19,8 @@ from app.schemas.scoring import (
     RecommendationIn,
     ReviewPackageOut,
 )
+from app.schemas.detailed_report import DetailedReportGenerateIn, DetailedReportSectionEditIn
+from app.services.detailed_report import DetailedReportService
 from app.services.enterprise_standards import EnterpriseStandardsService
 from app.services.exports import sanitize_download_name
 from app.services.publication import PublicationService
@@ -221,6 +223,48 @@ def update_enterprise_finding(
     )
     db.commit()
     return out
+
+
+@router.get("/assessments/{assessment_id}/review/detailed-report")
+def get_detailed_report_draft(
+    assessment_id: str,
+    _: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    draft = DetailedReportService(db).get_draft(assessment_id)
+    return draft.model_dump() if draft else {"detailed_review": None}
+
+
+@router.post("/assessments/{assessment_id}/review/detailed-report/generate")
+def generate_detailed_report(
+    assessment_id: str,
+    body: DetailedReportGenerateIn | None = None,
+    admin: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    section = body.section if body else None
+    report = DetailedReportService(db).generate(
+        assessment_id, section=section, actor=admin.get("subject", "admin")
+    )
+    db.commit()
+    return report.model_dump()
+
+
+@router.put("/assessments/{assessment_id}/review/detailed-report/section")
+def edit_detailed_report_section(
+    assessment_id: str,
+    body: DetailedReportSectionEditIn,
+    admin: dict[str, str] = Depends(require_admin_or_dev_mock),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    report = DetailedReportService(db).edit_section(
+        assessment_id,
+        section=body.section,
+        content=body.content,
+        actor=admin.get("subject", "admin"),
+    )
+    db.commit()
+    return report.model_dump()
 
 
 @router.post("/assessments/{assessment_id}/publish", response_model=PublishedReportOut)

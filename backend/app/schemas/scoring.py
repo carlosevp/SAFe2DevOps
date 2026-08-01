@@ -190,6 +190,8 @@ class PublishedResultsOut(StrictSchema):
     chart_summary: str
     scores: dict[str, float]
     enterprise_standards: dict | None = None
+    detailed_review: dict | None = None
+    detailed_review_incomplete: bool = False
     # Never include ai_candidate_score or numeric enterprise alignment score here
 
 

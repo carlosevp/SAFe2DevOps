@@ -53,6 +53,8 @@ def app_env(
         "INTEGRATION_PROVIDER": "mock",
         "INTERVIEW_PROVIDER": "mock",
         "ALLOW_MOCK_HOST_AUTH": "true",
+        "ENABLE_ADMIN_INTEGRATION_DIAGNOSTICS": "true",
+        "INTEGRATION_LOG_LEVEL": "WARNING",
     }
     previous = {key: os.environ.get(key) for key in env}
     os.environ.update(env)
